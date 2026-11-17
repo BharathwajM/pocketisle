@@ -262,10 +262,13 @@ pub fn best_attack(atk: &[usize], def: &[usize]) -> (usize, f32) {
     atk.iter().map(|a| (*a, effect(*a, def))).fold((atk[0], -1.0), |best, x| if x.1 > best.1 { x } else { best })
 }
 
+/// How often a clear type advantage wins a battle.
+pub const CLEAR_EDGE_WIN: f32 = 0.9;
+
 /// The chance your Pokémon (`me`, team level `level`) beats a wild one (`them`). The types
 /// decide it: a clear type advantage (super effective one way and not very effective or no
-/// use back, like Fire on Grass) always wins, and a clear disadvantage always loses. A
-/// one-sided edge (super effective one way only) wins about 3 in 4, an even match is a
+/// use back, like Fire on Grass) wins 9 times in 10, and a clear disadvantage loses 9 in 10.
+/// A one-sided edge (super effective one way only) wins about 3 in 4, an even match is a
 /// coin toss, and there the team's level adds or takes off up to a tenth.
 pub fn win_chance(me: &[usize], them: &[usize], level: u32) -> f32 {
     let (_, mine) = best_attack(me, them);
@@ -273,10 +276,10 @@ pub fn win_chance(me: &[usize], them: &[usize], level: u32) -> f32 {
     let l = |x: f32| if x <= 0.0 { -2.0 } else { x.log2() };
     let edge = l(mine) - l(theirs);
     if edge >= 2.0 {
-        return 1.0;
+        return CLEAR_EDGE_WIN;
     }
     if edge <= -2.0 {
-        return 0.0;
+        return 1.0 - CLEAR_EDGE_WIN;
     }
     let p = 0.5 + 0.22 * edge + ((level as f32 - 30.0) / 200.0).clamp(-0.1, 0.1);
     p.clamp(0.05, 0.95)
@@ -521,14 +524,15 @@ mod tests {
         let grass = [t("Grass")];
         let water = [t("Water")];
         assert!(win_chance(&fire, &grass, 30) > win_chance(&fire, &water, 30));
-        // A clear type advantage always wins and a clear disadvantage always loses, whatever
-        // the team's level: Arcanine (Fire) always beats Chikorita (Grass).
-        assert_eq!(win_chance(&types_of("arcanine"), &types_of("chikorita"), 1), 1.0);
-        assert_eq!(win_chance(&grass, &fire, 100), 0.0);
-        assert_eq!(win_chance(&water, &fire, 30), 1.0);
-        assert_eq!(win_chance(&grass, &water, 30), 1.0);
+        // A clear type advantage wins 9 in 10 and a clear disadvantage loses 9 in 10, whatever
+        // the team's level: Arcanine (Fire) beats Chikorita (Grass) 9 times in 10.
+        assert_eq!(win_chance(&types_of("arcanine"), &types_of("chikorita"), 1), 0.9);
+        assert_eq!(win_chance(&types_of("arcanine"), &types_of("chikorita"), 100), 0.9);
+        assert!((win_chance(&grass, &fire, 100) - 0.1).abs() < 1e-6);
+        assert_eq!(win_chance(&water, &fire, 30), 0.9);
+        assert_eq!(win_chance(&grass, &water, 30), 0.9);
         // Electric can't touch Ground at all.
-        assert_eq!(win_chance(&[t("Electric")], &[t("Ground")], 100), 0.0);
+        assert!((win_chance(&[t("Electric")], &[t("Ground")], 100) - 0.1).abs() < 1e-6);
         // Otherwise the level helps: an even match is a coin toss at level 30.
         assert!((win_chance(&fire, &fire, 30) - 0.5).abs() < 0.01);
         assert!(win_chance(&fire, &fire, 60) > win_chance(&fire, &fire, 10));

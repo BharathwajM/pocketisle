@@ -541,7 +541,7 @@ Right-click the island → *Reload YASB theme & settings* after changing your th
     The real type chart decides it, like the games: Fire beats Grass, Water beats Fire,
     Grass beats Water, Electric does nothing to Ground, and so on, dual types included.
     A clear type advantage (super effective while the other is not very effective back,
-    like Fire on Grass) **always wins**, and a clear disadvantage always loses. Super
+    like Fire on Grass) **wins 9 times in 10**, and a clear disadvantage loses 9 in 10. Super
     effective one way only wins about 3 in 4, and an even match is a coin toss; there your
     team's level adds or takes off up to a tenth. In the fight, a super effective
     hit lands big with **Super effective!** over whoever's hit, a weak one small with *Not
