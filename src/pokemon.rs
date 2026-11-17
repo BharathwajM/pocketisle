@@ -468,8 +468,19 @@ pub fn pretty(sprite: &str) -> String {
 const EGG_ONLY: [&str; 3] = ["larvitar", "deino", "axew"];
 /// Only out on special days and nights.
 pub const SPECIALS: [&str; 8] = ["clefairy", "deoxys", "misdreavus", "shuppet", "duskull", "drifloon", "delibird", "luvdisc"];
-/// The legendary birds: rare visitors in their own weather.
-pub const WEATHER_LEGENDS: [&str; 3] = ["zapdos", "articuno", "moltres"];
+/// The legendaries that come with their own weather or time of day instead of from the
+/// everyday legendary pool, and when: the birds, the beasts and the lake trio.
+pub const ROAMERS: [(&str, &str); 9] = [
+    ("zapdos", "thunderstorm or wind"),
+    ("articuno", "cold or snow"),
+    ("moltres", "hot sunny day"),
+    ("raikou", "thunderstorm or downpour"),
+    ("entei", "hot sunny day"),
+    ("suicune", "rain"),
+    ("uxie", "dawn"),
+    ("mesprit", "dusk"),
+    ("azelf", "night"),
+];
 /// The National Pokédex: all of them, every region.
 pub const DEX_SIZE: usize = NATIONAL.len();
 
@@ -563,13 +574,14 @@ pub fn wild() -> &'static [&'static str] {
 }
 
 /// Rare visitors (1 in 30), harder to catch: legendaries, mythicals, Ultra Beasts and Paradox
-/// Pokémon (not the birds, who come with their weather, or the special-night ones).
+/// Pokémon (not the roamers, who come with their weather or time of day, or the special-night
+/// ones).
 pub fn legends() -> &'static [&'static str] {
     static L: OnceLock<Vec<&'static str>> = OnceLock::new();
     L.get_or_init(|| {
         NATIONAL
             .iter()
-            .filter(|s| s.legend && !WEATHER_LEGENDS.contains(&s.name) && !SPECIALS.contains(&s.name))
+            .filter(|s| s.legend && !ROAMERS.iter().any(|r| r.0 == s.name) && !SPECIALS.contains(&s.name))
             .chain(FORMS.iter().filter(|s| regional(s) && s.legend))
             .map(|s| s.name)
             .collect()
@@ -717,19 +729,53 @@ pub fn rarity(name: &str) -> f32 {
     }
 }
 
-/// The legendary bird this weather might bring: Zapdos in a thunderstorm, Articuno in snow
-/// or hail, Moltres in a heatwave (30° and up, dry). With the weather's name.
-pub fn weather_legend(c: &Conditions) -> Option<(&'static str, &'static str)> {
+/// The legendaries this weather might bring, with the weather's name. Each has a rare big
+/// weather and an everyday one, so they all come even where it never snows: Zapdos in a
+/// thunderstorm or the wind, Raikou in a thunderstorm or a downpour, Suicune in any rain,
+/// Articuno in snow, hail or the cold, and Moltres and Entei in the heat (dry) or on a warm
+/// sunny day (25°+).
+pub fn weather_legends(c: &Conditions) -> Vec<(&'static str, &'static str)> {
+    let mut v = Vec::new();
     match c.sky {
-        Some(Kind::Storm) => Some(("zapdos", "thunderstorm")),
-        Some(Kind::Snow) | Some(Kind::Hail) => Some(("articuno", "snow")),
-        _ if c.hot && !c.wet() => Some(("moltres", "heatwave")),
+        Some(Kind::Storm) => v.extend([("zapdos", "thunderstorm"), ("raikou", "thunderstorm")]),
+        Some(Kind::Snow) => v.push(("articuno", "snow")),
+        Some(Kind::Hail) => v.push(("articuno", "hail")),
+        Some(Kind::Downpour) => v.extend([("raikou", "downpour"), ("suicune", "rain")]),
+        Some(Kind::Drizzle | Kind::Rain) => v.push(("suicune", "rain")),
+        _ => {}
+    }
+    let has = |v: &Vec<(&str, &str)>, n: &str| v.iter().any(|w| w.0 == n);
+    if c.windy && !has(&v, "zapdos") {
+        v.push(("zapdos", "wind"));
+    }
+    if c.cold && !has(&v, "articuno") {
+        v.push(("articuno", "cold"));
+    }
+    if c.hot && !c.wet() {
+        v.extend([("moltres", "heat"), ("entei", "heat")]);
+    } else if c.warm && c.day && c.sky == Some(Kind::Clear) {
+        v.extend([("moltres", "sunshine"), ("entei", "sunshine")]);
+    }
+    v
+}
+
+/// One visitor in this many is one of the weather's legendaries, while that weather lasts.
+pub const WEATHER_LEGEND_ODDS: f32 = 12.0;
+
+/// The lake trio comes out at its time of day: Uxie at dawn (5–8 am), Mesprit at dusk
+/// (5–8 pm) and Azelf the rest of the night. With the time's name.
+pub fn time_legend(hour: u32, day: bool) -> Option<(&'static str, &'static str)> {
+    match hour {
+        5..=7 => Some(("uxie", "dawn")),
+        17..=19 => Some(("mesprit", "dusk")),
+        _ if !day => Some(("azelf", "night")),
         _ => None,
     }
 }
 
-/// One visitor in this many is the weather's legendary bird, while that weather lasts.
-pub const WEATHER_LEGEND_ODDS: f32 = 12.0;
+/// One visitor in this many is the lake trio member out at that time (rarer than the weather
+/// ones, since dawn, dusk and night come every day).
+pub const TIME_LEGEND_ODDS: f32 = 30.0;
 
 /// A special day or night: who comes out, who looks after the island, and how it shows.
 pub struct Special {
@@ -911,7 +957,7 @@ pub fn special_missing(caught: impl Fn(&str) -> bool) -> Vec<(&'static str, &'st
             }
         }
     }
-    for (n, when) in [("zapdos", "thunderstorm"), ("articuno", "snow"), ("moltres", "heatwave")] {
+    for (n, when) in ROAMERS {
         if !caught(n) {
             v.push((n, when));
         }
@@ -988,9 +1034,17 @@ pub enum Kind {
     Snow,
 }
 
+/// Hot (°C and up), cold (°C and below) and windy (km/h and up). Set for a mild coastal
+/// climate like Sydney's, where it never snows and 30° days and 30 km/h winds are rare:
+/// the heat, the cold and the wind should still come round every year.
+pub const HOT: f32 = 28.0;
+pub const COLD: f32 = 10.0;
+pub const WINDY: f32 = 25.0;
+
 pub fn sky_for(code: i64) -> Kind {
     match code {
-        0 | 1 => Kind::Clear,
+        // A partly cloudy sky still counts as sunny.
+        0..=2 => Kind::Clear,
         45 | 48 => Kind::Fog,
         51..=57 => Kind::Drizzle,
         65 | 67 | 82 => Kind::Downpour,
@@ -1002,8 +1056,8 @@ pub fn sky_for(code: i64) -> Kind {
     }
 }
 
-/// The weather outside: the sky, daylight, and whether it's hot (30° and up), cold (8° and
-/// below) or windy (30 km/h and up).
+/// The weather outside: the sky, daylight, and whether it's hot, cold or windy (see HOT,
+/// COLD and WINDY).
 #[derive(Clone, Copy, Debug)]
 pub struct Conditions {
     pub sky: Option<Kind>,
@@ -1011,6 +1065,8 @@ pub struct Conditions {
     pub hot: bool,
     pub cold: bool,
     pub windy: bool,
+    /// Warm (25° and up): a warm sunny day brings Moltres and Entei.
+    pub warm: bool,
     /// The season where you are (none in tests that don't care).
     pub season: Option<Season>,
 }
@@ -1072,9 +1128,10 @@ impl Conditions {
         Conditions {
             sky: code.map(sky_for),
             day,
-            hot: temp.is_some_and(|t| t >= 30.0),
-            cold: temp.is_some_and(|t| t <= 8.0),
-            windy: wind.is_some_and(|w| w >= 30.0),
+            hot: temp.is_some_and(|t| t >= HOT),
+            cold: temp.is_some_and(|t| t <= COLD),
+            windy: wind.is_some_and(|w| w >= WINDY),
+            warm: temp.is_some_and(|t| t >= 25.0),
             season: None,
         }
     }
@@ -1335,7 +1392,13 @@ mod tests {
         assert!(spawn_line(&rain).starts_with("Rain"));
         assert_eq!(spawn_line(&Conditions::new(Some(3), false, None, None)), "Cloudy: fairy, fighting & poison types out, night: ghost & dark types");
         assert_eq!(spawn_line(&Conditions::new(Some(45), false, None, None)), "Fog: ghosts & drifters out, night: ghost & dark types");
-        assert!(spawn_line(&Conditions::new(Some(2), true, Some(20.0), Some(5.0))).starts_with("Cloudy"));
+        // Partly cloudy counts as sunny.
+        assert!(spawn_line(&Conditions::new(Some(2), true, Some(20.0), Some(5.0))).starts_with("Sunny"));
+        // Sydney weather: 28° is hot, a 10° night is cold, a 25 km/h wind is windy.
+        let sydney = |t: f32, w: f32| Conditions::new(Some(1), true, Some(t), Some(w));
+        assert!(sydney(28.0, 5.0).hot && !sydney(27.0, 5.0).hot);
+        assert!(sydney(10.0, 5.0).cold && !sydney(11.0, 5.0).cold);
+        assert!(sydney(20.0, 25.0).windy && !sydney(20.0, 24.0).windy);
         assert!(spawn_line(&Conditions::new(None, true, Some(20.0), Some(5.0))).is_empty());
         let cloudy = Conditions::new(Some(3), true, Some(20.0), Some(5.0));
         assert!(spawn_weight(&cloudy, "machop") > 2.0);
@@ -1406,10 +1469,25 @@ mod tests {
         let snow = Conditions::new(Some(73), true, Some(-1.0), Some(5.0));
         let heat = Conditions::new(Some(0), true, Some(34.0), Some(5.0));
         let rain = Conditions::new(Some(61), true, Some(31.0), Some(5.0));
-        assert_eq!(weather_legend(&storm).map(|w| w.0), Some("zapdos"));
-        assert_eq!(weather_legend(&snow).map(|w| w.0), Some("articuno"));
-        assert_eq!(weather_legend(&heat).map(|w| w.0), Some("moltres"));
-        assert_eq!(weather_legend(&rain), None);
+        let names = |c: &Conditions| weather_legends(c).into_iter().map(|w| w.0).collect::<Vec<_>>();
+        assert_eq!(names(&storm), ["zapdos", "raikou"]);
+        assert_eq!(names(&snow), ["articuno"]);
+        assert_eq!(names(&heat), ["moltres", "entei"]);
+        assert_eq!(names(&rain), ["suicune"]);
+        // Everyday weather brings them too, where it never snows or hits 30°: a cool clear
+        // night, a warm sunny day, a windy day and a downpour.
+        assert_eq!(names(&Conditions::new(Some(0), false, Some(9.0), Some(5.0))), ["articuno"]);
+        assert_eq!(names(&Conditions::new(Some(0), true, Some(26.0), Some(5.0))), ["moltres", "entei"]);
+        assert_eq!(names(&Conditions::new(Some(0), false, Some(26.0), Some(5.0))), Vec::<&str>::new());
+        assert_eq!(names(&Conditions::new(Some(3), true, Some(18.0), Some(35.0))), ["zapdos"]);
+        assert_eq!(names(&Conditions::new(Some(65), true, Some(18.0), Some(5.0))), ["raikou", "suicune"]);
+        assert!(names(&Conditions::new(Some(3), true, Some(20.0), Some(5.0))).is_empty());
+        assert_eq!(time_legend(6, true).map(|w| w.0), Some("uxie"));
+        assert_eq!(time_legend(18, true).map(|w| w.0), Some("mesprit"));
+        assert_eq!(time_legend(23, false).map(|w| w.0), Some("azelf"));
+        assert_eq!(time_legend(13, true), None);
+        // The roamers only come their own way, not from the everyday legendary pool.
+        assert!(ROAMERS.iter().all(|r| !legends().contains(&r.0)));
         // Only the team members you've met are announced.
         assert!(changes_of(13, 14, |n| n == "Swampert").is_empty());
         assert_eq!(changes_of(13, 14, |n| n == "Infernape"), vec![("chimchar".to_string(), "monferno".to_string())]);

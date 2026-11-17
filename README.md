@@ -382,9 +382,9 @@ Right-click the island → *Reload YASB theme & settings* after changing your th
   Zekrom, Thundurus, Ampharos, Luxray, Electivire, Raichu, Jolteon, Pikachu; hail
   Articuno, Kyurem, Regice, Mamoswine, Glaceon, Walrein, Lapras; snow Articuno, Glaceon,
   Regice, Abomasnow, Froslass, Weavile, Lapras; fog Mewtwo, Giratina, Gengar, Gardevoir,
-  Mismagius, Darkrai; wind (30 km/h+) Rayquaza, Lugia, Tornadus, Pidgeot, Staraptor,
-  Salamence, Dragonite, Braviary; heat (30°+) Groudon, Entei, Heatran, Reshiram, Charizard,
-  Arcanine, Magmortar, Typhlosion; cold (8° or less) Articuno, Glaceon, Lapras, Walrein,
+  Mismagius, Darkrai; wind (25 km/h+) Rayquaza, Lugia, Tornadus, Pidgeot, Staraptor,
+  Salamence, Dragonite, Braviary; heat (28°+) Groudon, Entei, Heatran, Reshiram, Charizard,
+  Arcanine, Magmortar, Typhlosion; cold (10° or less) Articuno, Glaceon, Lapras, Walrein,
   Abomasnow, Weavile; clear nights Darkrai, Umbreon, Cresselia, Gengar, Absol, Houndoom,
   Mismagius; sunshine Groudon, Charizard, Victini, Reshiram, Entei, Arcanine, Ninetales,
   Typhlosion, Infernape; clouds Rayquaza, Lugia, Latias, Latios, Altaria, Dragonite,
@@ -438,16 +438,23 @@ Right-click the island → *Reload YASB theme & settings* after changing your th
     (and fewer water types); fog ghosts and drifters; cloudy skies fairy, fighting and
     poison types; snow Piplup, Swablu and Snorlax.
     **Fire types never come out in any rain, storm or hail**, and are rarer in snow and
-    cold. Heat (30°+) brings more fire types, cold (8° or less) icy ones, wind (30 km/h+)
+    cold. Heat (28°+) brings more fire types, cold (10° or less) icy ones, wind (25 km/h+)
     flying ones (Pidgey, Swablu, Jigglypuff, Lugia), and night ghost and dark types
     (Gastly, Zorua, Litwick…) with fewer grass types. Kyogre likes rain, Groudon sun,
     Darkrai the night. It all goes by type, so every water type likes the rain and so on.
+    The lines are set for a mild climate like Sydney's, where it never snows and 30° days
+    are rare, so the heat, the cold and the wind all still come round each year, and a
+    partly cloudy sky counts as sunny.
     The Pokédex tab says what's out now. A visitor the weather suits (twice as likely as
     usual or more) is **weather-boosted**: the weather's icon shows by its head, it's a
     little easier to catch, and it gives half as much XP again.
-  - **Rare weather legends.** In a thunderstorm 1 visitor in 12 is Zapdos, in snow or hail
-    Articuno, and in a heatwave (30°+, dry) Moltres: legendary, so hard to catch. Moltres
-    also looks after the island in the heat.
+  - **Roaming legends.** The birds, the beasts and the lake trio come their own way, not from
+    the everyday legendary pool. While their weather lasts, 1 visitor in 12 is one of them:
+    Zapdos in a thunderstorm or the wind (25 km/h+), Raikou in a thunderstorm or a
+    downpour, Suicune in any rain, Articuno in snow, hail or the cold (10° or less), and
+    Moltres and Entei in the heat (28°+, dry) or on a warm sunny day (25°+). Every day,
+    1 visitor in 30 is Uxie at dawn (5–8 am), Mesprit at dusk (5–8 pm) or Azelf at night.
+    Legendary, so hard to catch. Moltres also looks after the island in the heat.
   - **Special days and nights.** Halloween week (25–31 Oct) sends ghosts (Gastly,
     Misdreavus, Shuppet, Duskull, Drifloon, Litwick, Zorua) half the time, with purple and
     green wisps drifting up the island. A **full moon** (worked out from the date, within a
@@ -490,7 +497,7 @@ Right-click the island → *Reload YASB theme & settings* after changing your th
     shows each one's type): caught ones with their sprite and count (a sparkle for shiny),
     **?** for the rest and a faint egg for the egg-only ones. Below it, the special-day and
     rare-weather Pokémon still to catch and when they come out ("Clefairy (full moon) ·
-    Deoxys (meteor shower) · Zapdos (thunderstorm)…").
+    Deoxys (meteor shower) · Zapdos (thunderstorm or wind)…").
   - **Caught Pokémon evolve with the team.** When the team's level reaches a caught
     Pokémon's evolution level, the evolved form joins your Pokédex (the one you caught
     stays in it too), so the Pokédex fills itself in as you gain XP: Pidgey → Pidgeotto at
@@ -613,9 +620,9 @@ Right-click the island → *Reload YASB theme & settings* after changing your th
   - Clouds drift past; fog hangs low; snow flutters down.
   - Heavy rain pours harder than rain, which falls harder than drizzle.
   - Hail: storm clouds, rain and white hailstones bouncing off the edge.
-  - Wind (30 km/h and up): gusts streak across, and rain, hail and snow blow sideways.
-  - Heat (30° and up, on a dry day): a shimmer rises off the island.
-  - Cold (8° or less): frost glints along the edge.
+  - Wind (25 km/h and up): gusts streak across, and rain, hail and snow blow sideways.
+  - Heat (28° and up, on a dry day): a shimmer rises off the island.
+  - Cold (10° or less): frost glints along the edge.
 
   Each effect redraws only as often as it needs to look smooth (rain about 20 times a
   second, clouds 10), about 4–7% of one core. Try one with `weather_effect` (`"rain"`,

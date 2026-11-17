@@ -3991,7 +3991,12 @@ impl App {
             let have: Vec<&'static str> = s.visitors.iter().copied().filter(|n| pokemon::has_sprite(n)).collect();
             (!have.is_empty() && rand01() < s.share).then(|| (have[(rand01() * have.len() as f32) as usize % have.len()], s.legend))
         });
-        let bird = pokemon::weather_legend(&self.conditions()).filter(|(n, _)| pokemon::has_sprite(n) && rand01() < 1.0 / pokemon::WEATHER_LEGEND_ODDS);
+        // A roaming legendary: one the weather brings, or the lake trio member out at this
+        // time of day.
+        let c = self.conditions();
+        let roamers: Vec<(&'static str, &'static str)> = pokemon::weather_legends(&c).into_iter().filter(|(n, _)| pokemon::has_sprite(n)).collect();
+        let bird = (!roamers.is_empty() && rand01() < 1.0 / pokemon::WEATHER_LEGEND_ODDS).then(|| roamers[(rand01() * roamers.len() as f32) as usize % roamers.len()]);
+        let bird = bird.or_else(|| pokemon::time_legend(calendar::local_now().h, c.day).filter(|(n, _)| pokemon::has_sprite(n) && rand01() < 1.0 / pokemon::TIME_LEGEND_ODDS));
         if let Some((n, w)) = bird {
             util::log(&format!("the {w} brought {n}"));
         }
