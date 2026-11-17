@@ -767,8 +767,10 @@ Log: `%LOCALAPPDATA%\PocketIsle\pocketisle.log` (right-click → *Open log*).
 - **Claude:** the same endpoint Claude Code's `/usage` uses
   (`api.anthropic.com/api/oauth/usage`), signed in with Claude Code's own login from
   `%USERPROFILE%\.claude\.credentials.json`. Pocket Isle only reads that file: it never refreshes,
-  writes or logs the token. If the sign-in has expired, the island says so until you next
-  use Claude Code (which renews it).
+  writes or logs the token. When the short-lived sign-in expires, the island has Claude Code
+  renew it (`claude doctor`). Claude Code's login itself also ends after a while; then the
+  Claude row says **signed out** and you need to sign in again with `claude auth login`. The
+  island notices the new sign-in within 5 minutes.
   If Anthropic answers "rate limited", the island keeps showing the last reading and waits
   15 minutes before asking again (30, then 60 if it repeats); Claude Code activity and
   restarts don't cut that short. The last reading is kept in

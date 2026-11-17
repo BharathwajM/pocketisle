@@ -9093,24 +9093,28 @@ impl App {
         }
         let now = usage::now_unix();
         for u in self.usage.clone() {
-            let worst = u.limits.iter().map(|l| l.used).fold(0.0f32, f32::max);
-            let icol = if u.limits.is_empty() { th.subtext } else { self.level_color(worst) };
+            // Signed out: the old bars would only mislead, so show what to do instead.
+            let signed_out = u.error.as_deref() == Some(usage::SIGNED_OUT);
+            let limits = if signed_out { Vec::new() } else { u.limits.clone() };
+            let worst = limits.iter().map(|l| l.used).fold(0.0f32, f32::max);
+            let icol = if limits.is_empty() { th.subtext } else { self.level_color(worst) };
             self.r.icon(G_GAUGE, R::xywh(x0, y, 20.0, 34.0), 14.0, icol);
             self.r.text(u.provider, R::new(x0 + 28.0, y + 1.0, x0 + 100.0, y + 18.0), 12.0, 600, th.text, Align::Left);
-            let (note, ncol) = match (&u.error, u.limits.is_empty()) {
+            let (note, ncol) = match (&u.error, limits.is_empty()) {
+                _ if signed_out => ("signed out".to_string(), self.level_color(1.0)),
                 (Some(_), false) => ("not updated".to_string(), th.subtext.a(0.7)),
                 _ => (u.note.clone(), th.subtext),
             };
             self.r.text(&note, R::new(x0 + 28.0, y + 17.0, x0 + 98.0, y + 32.0), 10.5, 400, ncol, Align::Left);
             let cx0 = x0 + 104.0;
-            if u.limits.is_empty() {
+            if limits.is_empty() {
                 let msg = u.error.clone().unwrap_or_default();
                 self.r.text(&msg, R::new(cx0, y, x1, y + 34.0), 11.5, 400, th.subtext, Align::Left);
             } else {
-                let n = u.limits.len().min(3);
+                let n = limits.len().min(3);
                 let gap = 14.0;
                 let cw = (x1 - cx0 - gap * (n as f32 - 1.0)) / n as f32;
-                for (i, l) in u.limits.iter().take(n).enumerate() {
+                for (i, l) in limits.iter().take(n).enumerate() {
                     let lx = cx0 + i as f32 * (cw + gap);
                     let col = self.level_color(l.used);
                     let label = match l.resets_at {

@@ -288,12 +288,15 @@ fn plan_name(s: &str) -> String {
     }
 }
 
-/// Claude Code's saved sign-in: (access token, plan, expiry in ms).
+/// Claude Code's saved sign-in: (access token, plan, expiry in ms). The token is empty when
+/// the sign-in itself has ended (Claude Code clears it and notes `loginEnded`): only signing in
+/// again brings it back, so there is nothing to renew.
 fn read_sign_in() -> Option<(String, String, Option<i64>)> {
     let text = std::fs::read_to_string(claude_dir().join(".credentials.json")).ok()?;
     let cred = serde_json::from_str::<Value>(text.trim_start_matches('\u{feff}')).ok()?;
     let oauth = &cred["claudeAiOauth"];
-    let token = oauth["accessToken"].as_str()?.to_string();
+    let ended = oauth.get("loginEnded").is_some_and(|v| !v.is_null());
+    let token = if ended { String::new() } else { oauth["accessToken"].as_str()?.to_string() };
     let note = oauth["subscriptionType"].as_str().map(plan_name).unwrap_or_default();
     Some((token, note, oauth["expiresAt"].as_i64()))
 }
@@ -346,9 +349,16 @@ fn renew_sign_in() -> bool {
     true
 }
 
+/// Shown when Claude Code's sign-in has ended; the island matches on it.
+pub const SIGNED_OUT: &str = "signed out of Claude Code: run `claude auth login`";
+
 fn fetch_claude() -> Fetch {
     const P: &str = "Claude";
     let Some(mut cred) = read_sign_in() else { return Fetch::Absent };
+    if cred.0.is_empty() {
+        // Signed out: look again every few minutes (just a file read) for a new sign-in.
+        return Fetch::Err { provider: P, msg: SIGNED_OUT.into(), retry: Some(Duration::from_secs(5 * 60)) };
+    }
     let expired = |c: &(String, String, Option<i64>)| c.2.is_some_and(|e| e / 1000 < now_unix() + 60);
     if expired(&cred) && renew_sign_in() {
         if let Some(c) = read_sign_in() {
@@ -599,7 +609,7 @@ fn codex_rate_limits(exe: &PathBuf, via_cmd: bool) -> Result<Value, String> {
     };
     let mut send = |s: &str| writeln!(stdin, "{s}").and_then(|_| stdin.flush()).map_err(|_| "Codex CLI closed".to_string());
     let result = (|| {
-        send(r#"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"pocketisle","title":"Pocket Isle","version":"0.2.3"}}}"#)?;
+        send(r#"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"pocketisle","title":"Pocket Isle","version":"0.2.4"}}}"#)?;
         wait_for(1)?;
         send(r#"{"method":"initialized"}"#)?;
         send(r#"{"id":2,"method":"account/rateLimits/read"}"#)?;
