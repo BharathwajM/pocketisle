@@ -538,8 +538,15 @@ Right-click the island → *Reload YASB theme & settings* after changing your th
     `outbreaks`
   - **Battles.** About one visitor in five (never a legendary or a shiny) wants to battle
     first: crossed swords show over it. Click it and your Pokémon fights it on the pill.
-    The real type chart and your team's level decide the odds (Fire beats Grass, Water
-    beats Fire, and so on). Win: +40 XP (+10 more if your attack was super effective),
+    The real type chart decides it, like the games: Fire beats Grass, Water beats Fire,
+    Grass beats Water, Electric does nothing to Ground, and so on, dual types included.
+    A clear type advantage (super effective while the other is not very effective back,
+    like Fire on Grass) **always wins**, and a clear disadvantage always loses. Super
+    effective one way only wins about 3 in 4, and an even match is a coin toss; there your
+    team's level adds or takes off up to a tenth. In the fight, a super effective
+    hit lands big with **Super effective!** over whoever's hit, a weak one small with *Not
+    very effective…*, and the card says the matchup ("Fire on Grass: super effective").
+    Win: +40 XP (+10 more if your attack was super effective),
     sometimes a Great Ball, and the visitor is tired, so it's easier to catch. Lose: +10 XP
     and it runs off. A fainted Pokémon (Claude's limit used up) can't battle. `battles`
   - **Weekend raids.** On Saturday and Sunday a strong legendary (the same one all

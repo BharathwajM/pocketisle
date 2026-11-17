@@ -4280,7 +4280,7 @@ impl App {
             self.dex.save();
             let xp = 40 + if my_x >= 2.0 { 10 } else { 0 };
             let found = if ball { " · found a Great Ball" } else { "" };
-            let body = format!("{} attack: {} · +{xp} XP{found} · {foe} is tired: easier to catch", pokemon::TYPES[mine].0, crate::quest::effect_words(my_x));
+            let body = format!("{} on {}: {} · +{xp} XP{found} · {foe} is tired: easier to catch", pokemon::TYPES[mine].0, type_names(&them), crate::quest::effect_words(my_x));
             let ttl = self.card_ttl(6.0);
             self.push_card(Card {
                 key: Some("battle".into()),
@@ -4303,7 +4303,7 @@ impl App {
             self.dex.visitor = None;
             self.dex.battles_lost += 1;
             self.dex.save();
-            let body = format!("Its {} attack was {} · +10 XP for trying", pokemon::TYPES[theirs].0, crate::quest::effect_words(their_x));
+            let body = format!("Its {} on your {}: {} · +10 XP for trying", pokemon::TYPES[theirs].0, type_names(&me), crate::quest::effect_words(their_x));
             let ttl = self.card_ttl(5.0);
             self.push_card(Card {
                 key: Some("battle".into()),
@@ -4707,8 +4707,10 @@ impl App {
             let c = at.elapsed().as_secs_f32();
             let me = crate::quest::types_of(&self.mascot_sprite(PipMood::Calm));
             let them = crate::quest::types_of(&name);
-            let (mine, _) = crate::quest::best_attack(&me, &them);
-            let (theirs, _) = crate::quest::best_attack(&them, &me);
+            let (mine, my_x) = crate::quest::best_attack(&me, &them);
+            let (theirs, their_x) = crate::quest::best_attack(&them, &me);
+            // A super effective hit lands big, a weak one small, one with no effect fizzles.
+            let hit = |x: f32| if x <= 0.0 { 0.25 } else { (0.6 + 0.4 * x).min(1.6) };
             let tc = |i: usize| {
                 let (r, g, b) = pokemon::TYPES[i % 18].1;
                 Rgba::rgb(r, g, b)
@@ -4718,7 +4720,7 @@ impl App {
             let k = (c / 0.7).fract();
             let mut shake = 0.0;
             if phase < 3 {
-                let (a, b, col) = if k < 0.5 { (from, (dest.cx(), dest.cy()), tc(mine)) } else { ((dest.cx(), dest.cy()), from, tc(theirs)) };
+                let (a, b, col, x) = if k < 0.5 { (from, (dest.cx(), dest.cy()), tc(mine), my_x) } else { ((dest.cx(), dest.cy()), from, tc(theirs), their_x) };
                 let u = (k % 0.5) / 0.5;
                 if u < 0.7 {
                     let v = u / 0.7;
@@ -4727,9 +4729,9 @@ impl App {
                     self.r.circle(bx, by, 2.6, col);
                 } else {
                     let v = (u - 0.7) / 0.3;
-                    self.r.glow(b.0, b.1, 16.0, col.a(0.5 * (1.0 - v)));
+                    self.r.glow(b.0, b.1, 16.0 * hit(x), col.a(0.5 * (1.0 - v)));
                     if k < 0.5 {
-                        shake = (v * 30.0).sin() * 2.0;
+                        shake = (v * 30.0).sin() * 2.0 * hit(x);
                     }
                 }
             }
@@ -4743,8 +4745,29 @@ impl App {
                 let (msg, col) = if win { ("You won!", Rgba::rgb(255, 225, 110)) } else { ("It won…", Rgba::rgb(255, 120, 100)) };
                 self.r.text(msg, r, 10.5, 800, col, Align::Center);
             } else {
-                let r = R::new(dest.cx() - 8.0, (dest.y0 - 15.0).max(p.y0 - 6.0), dest.cx() + 8.0, dest.y0 + 1.0);
-                self.r.icon(G_SWORDS, r, 11.0, Rgba::rgb(255, 140, 100));
+                // Over whoever is being hit, like the games: "Super effective!" and friends
+                // (crossed swords over the visitor for an ordinary hit).
+                let (x, over) = if k < 0.5 { (my_x, Some(dest)) } else { (their_x, self.mon_rect) };
+                let words = if x >= 2.0 {
+                    Some(("Super effective!", Rgba::rgb(255, 225, 110)))
+                } else if x <= 0.0 {
+                    Some(("No effect…", Rgba::rgb(190, 190, 200)))
+                } else if x < 1.0 {
+                    Some(("Not very effective…", Rgba::rgb(190, 190, 200)))
+                } else {
+                    None
+                };
+                match (words, over) {
+                    (Some((msg, col)), Some(o)) => {
+                        let r = R::new(o.cx() - 70.0, (o.y0 - 14.0).max(p.y0 - 6.0), o.cx() + 70.0, o.y0 + 2.0);
+                        self.r.text(msg, r, 9.5, 800, col, Align::Center);
+                    }
+                    _ if k < 0.5 => {
+                        let r = R::new(dest.cx() - 8.0, (dest.y0 - 15.0).max(p.y0 - 6.0), dest.cx() + 8.0, dest.y0 + 1.0);
+                        self.r.icon(G_SWORDS, r, 11.0, Rgba::rgb(255, 140, 100));
+                    }
+                    _ => {}
+                }
             }
             return;
         }
@@ -9203,6 +9226,11 @@ fn user_idle_ms() -> u32 {
 /// A random number in 0..1 (xorshift, seeded from the clock).
 /// Is the island's weather place in the southern hemisphere (where the moon looks the other
 /// way round)? Worked out once.
+/// A Pokémon's types for a card: "Grass" or "Water/Ground".
+fn type_names(types: &[usize]) -> String {
+    types.iter().map(|t| pokemon::TYPES[*t % 18].0).collect::<Vec<_>>().join("/")
+}
+
 fn southern() -> bool {
     static SOUTH: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *SOUTH.get_or_init(|| Config::load().weather_place().is_some_and(|p| p.lat < 0.0))
