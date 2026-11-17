@@ -1,0 +1,18 @@
+# Build output
+/target/
+
+# Local build settings (point the build folder at a short path on this PC)
+/.cargo/config.toml
+
+# Local backups and scratch copies
+/src_backup_*/
+*.f[0-9]*
+
+# Never commit downloaded Pokémon sprites or cries, games, or personal data
+sprites/
+*.ogg
+*.gba
+*.nds
+*.gb
+*.gbc
+*.sav
