@@ -723,6 +723,9 @@ struct App {
     fish_rect: Option<R>,
     /// The Pokédex tab's legend quests page.
     dex_quests: bool,
+    /// The Pokédex tab's Legends view, and the region it shows (by `REGIONS`).
+    dex_legends: bool,
+    legend_page: usize,
     /// Hearts floating up from the Pokémon (x, y, born), and "+XP" pops (amount, when).
     hearts: Vec<(f32, f32, Instant)>,
     /// An egg is hatching (since when).
@@ -1833,7 +1836,7 @@ impl App {
             Tab::Controls => 40.0 * 2.0 + 8.0 + 12.0 + 30.0 * 4.0 + self.wpe_height() + self.outputs_height(),
             Tab::Shelf => self.shelf_height(),
             Tab::Dex => {
-                let more = if self.dex_forms || self.dex_shiny || !self.special_missing().is_empty() { 34.0 } else { 0.0 };
+                let more = if self.dex_forms || self.dex_shiny || self.dex_legends || !self.special_missing().is_empty() { 34.0 } else { 0.0 };
                 let more = if self.dex_bag { f32::max(more, 52.0) } else { more };
                 let more = if self.dex_card { f32::max(more, 126.0) } else { more };
                 60.0 + 10.0 + 34.0 + 32.0 + 26.0 + DEX_ROWS as f32 * DEX_CELL + more
@@ -5421,6 +5424,86 @@ impl App {
         }
     }
 
+    /// The Pokédex's Legends view: every legendary, mythical, Ultra Beast and Paradox
+    /// Pokémon of one region a page (faint until caught), and how the missing ones turn up.
+    fn draw_legends(&mut self, x0: f32, x1: f32, mut y: f32) {
+        let th = self.theme.clone();
+        let all = pokemon::legends_by_region();
+        let pages = all.len();
+        self.legend_page %= pages;
+        let list = all[self.legend_page].clone();
+        let region = crate::national::REGIONS[self.legend_page];
+        let caught = |d: &crate::dex::Dex, n: &str| d.caught.contains_key(n);
+        let here = list.iter().filter(|n| caught(&self.dex, n)).count();
+        let total: usize = all.iter().map(|l| l.len()).sum();
+        let got: usize = all.iter().flatten().filter(|n| caught(&self.dex, n)).count();
+        for (r, d, glyph) in [(R::new(x0, y, x0 + 30.0, y + 22.0), -1, "‹"), (R::new(x1 - 30.0, y, x1, y + 22.0), 1, "›")] {
+            let hot = self.hot == Some(Btn::DexPage(d));
+            self.r.fill_round(r, 10.0, if hot { th.hover } else { th.bg2.a(0.6) });
+            self.r.text(glyph, r, 16.0, 700, th.text, Align::Center);
+            self.buttons.push((r, Btn::DexPage(d)));
+        }
+        let mid = R::new(x0 + 36.0, y, x1 - 36.0, y + 22.0);
+        let label = format!("{region} legends   ·   {here} / {} caught   ·   {got} / {total} in all   ·   page {} of {pages}", list.len(), self.legend_page + 1);
+        self.r.text(&label, mid, 11.0, 600, if here == list.len() { th.good } else { th.subtext }, Align::Center);
+        y += 26.0;
+        // Bigger cells than the grid, with names: no region has more than 32.
+        let cols = 8usize;
+        let ch = DEX_ROWS as f32 * DEX_CELL / (list.len().div_ceil(cols).max(4)) as f32;
+        let cw = (x1 - x0) / cols as f32;
+        for (i, &name) in list.iter().enumerate() {
+            let cell = R::xywh(x0 + (i % cols) as f32 * cw, y + (i / cols) as f32 * ch, cw, ch).inset(2.0);
+            let n = self.dex.caught.get(name).copied().unwrap_or(0);
+            let sh = self.dex.shiny.get(name).copied().unwrap_or(0);
+            self.r.fill_round(cell, 9.0, if n > 0 { th.accent.a(0.16) } else { th.bg2.a(0.32) });
+            let art = R::new(cell.x0 + 3.0, cell.y0 + 2.0, cell.x1 - 3.0, cell.y1 - 14.0);
+            let show = if sh > 0 && sh == n { format!("{name}-shiny") } else { name.to_string() };
+            if let Some((bmp, w, h)) = self.dex_thumb(&show) {
+                let k = (art.h() / h).min(art.w() / w);
+                let d = R::xywh(art.cx() - w * k / 2.0, art.cy() - h * k / 2.0, w * k, h * k);
+                self.r.sprite_flip(&bmp, d, R::xywh(0.0, 0.0, w, h), true, false, if n > 0 { 1.0 } else { 0.16 });
+            }
+            let title = R::new(cell.x0 + 2.0, cell.y1 - 14.0, cell.x1 - 2.0, cell.y1 - 1.0);
+            self.r.text(&pokemon::pretty(name), title, 9.0, 600, if n > 0 { th.text } else { th.subtext.a(0.55) }, Align::Center);
+            if n == 0 {
+                continue;
+            }
+            if n > 1 {
+                self.r.text(&format!("×{n}"), R::new(cell.x0, cell.y0 + 1.0, cell.x1 - 4.0, cell.y0 + 13.0), 9.0, 700, th.subtext, Align::Right);
+            }
+            if sh > 0 {
+                self.twinkle(cell.x0 + 7.0, cell.y0 + 7.0, 3.0, Rgba::rgb(255, 215, 90));
+            }
+            if self.dex.buddy == name {
+                self.r.text("♥", R::new(cell.x0 + 1.0, cell.y1 - 28.0, cell.x0 + 14.0, cell.y1 - 15.0), 10.0, 700, th.accent, Align::Center);
+            } else if self.hot == Some(Btn::Buddy(name)) {
+                self.r.text("♡", R::new(cell.x0 + 1.0, cell.y1 - 28.0, cell.x0 + 14.0, cell.y1 - 15.0), 10.0, 700, th.subtext, Align::Center);
+            }
+            self.buttons.push((cell, Btn::Buddy(name)));
+        }
+        // How this region's missing ones turn up.
+        let y = y + DEX_ROWS as f32 * DEX_CELL + 4.0;
+        let mut ways: Vec<String> = Vec::new();
+        for (n, when) in self.special_missing() {
+            if list.contains(&n) {
+                ways.push(format!("{} ({when})", pokemon::pretty(n)));
+            }
+        }
+        for q in crate::quest::QUESTS.iter() {
+            if list.contains(&q.legend) && !caught(&self.dex, q.legend) && !ways.iter().any(|w| w.starts_with(&pokemon::pretty(q.legend))) {
+                ways.push(format!("{} (legend quest: {})", pokemon::pretty(q.legend), q.title));
+            }
+        }
+        let line = if here == list.len() {
+            format!("Every {region} legend caught!  ·  Legends visit 1 in 30 times, more come with the weather, legend quests and weekend raids")
+        } else if ways.is_empty() {
+            "Legends visit 1 in 30 times and are harder to catch  ·  weekend raids bring a strong one  ·  Ultra and Master Balls help".to_string()
+        } else {
+            format!("Legends visit 1 in 30 times  ·  {}", ways.join(" · "))
+        };
+        self.r.text_wrapped(&line, R::new(x0 + 4.0, y, x1 - 4.0, y + 30.0), 10.5, 400, th.subtext);
+    }
+
     /// Is Windows' do not disturb on? (Also keeps the Controls tab's toggle current.)
     fn dnd_on(&mut self) -> bool {
         self.ctl_dnd = controls::dnd();
@@ -5910,10 +5993,10 @@ impl App {
         let mut x = x0 + 50.0;
         let recent = self.dex.recent.clone();
         if recent.is_empty() {
-            self.r.text("Nothing caught yet", R::new(x, y, x1 - 330.0, y + 28.0), 10.5, 400, th.subtext.a(0.6), Align::Left);
+            self.r.text("Nothing caught yet", R::new(x, y, x1 - 376.0, y + 28.0), 10.5, 400, th.subtext.a(0.6), Align::Left);
         }
         for s in &recent {
-            if x + 28.0 > x1 - 328.0 {
+            if x + 28.0 > x1 - 374.0 {
                 break;
             }
             if let Some((bmp, w, h)) = self.dex_thumb(s) {
@@ -5926,9 +6009,9 @@ impl App {
             }
             x += 30.0;
         }
-        let view = if self.dex_card { 2 } else if self.dex_bag { 5 } else if self.dex_quests { 6 } else if self.dex_shiny { 4 } else if self.dex_forms { 3 } else if self.dex.by_type { 1 } else { 0 };
-        for (i, (label, v)) in [("No.", 0u8), ("Type", 1), ("Forms", 3), ("Shiny", 4), ("Bag", 5), ("Quests", 6), ("Trainer", 2)].into_iter().enumerate() {
-            let r = R::new(x1 - 322.0 + i as f32 * 46.0, y + 4.0, x1 - 279.0 + i as f32 * 46.0, y + 24.0);
+        let view = if self.dex_card { 2 } else if self.dex_bag { 5 } else if self.dex_quests { 6 } else if self.dex_legends { 7 } else if self.dex_shiny { 4 } else if self.dex_forms { 3 } else if self.dex.by_type { 1 } else { 0 };
+        for (i, (label, v)) in [("No.", 0u8), ("Type", 1), ("Forms", 3), ("Shiny", 4), ("Legends", 7), ("Bag", 5), ("Quests", 6), ("Trainer", 2)].into_iter().enumerate() {
+            let r = R::new(x1 - 368.0 + i as f32 * 46.0, y + 4.0, x1 - 325.0 + i as f32 * 46.0, y + 24.0);
             let on = view == v;
             let hot = self.hot == Some(Btn::DexView(v));
             self.r.fill_round(r, 10.0, if on { th.accent } else if hot { th.hover } else { th.bg2.a(0.6) });
@@ -5944,6 +6027,9 @@ impl App {
         }
         if self.dex_quests {
             return self.draw_quests(x0, x1, y);
+        }
+        if self.dex_legends {
+            return self.draw_legends(x0, x1, y);
         }
         let per = DEX_COLS * DEX_ROWS;
         // Regional forms on their own pages, then the Megas, then Gigantamax.
@@ -6502,7 +6588,8 @@ impl App {
                             self.dex_card = v == 2;
                             self.dex_bag = v == 5;
                             self.dex_quests = v == 6;
-                            let grid = v != 2 && v != 5 && v != 6;
+                            self.dex_legends = v == 7;
+                            let grid = v != 2 && v != 5 && v != 6 && v != 7;
                             if grid && ((v == 3) != self.dex_forms || (v == 4) != self.dex_shiny) {
                                 self.dex_page = 0;
                             }
@@ -6514,6 +6601,10 @@ impl App {
                                 self.dex.by_type = v == 1;
                                 self.dex.save();
                             }
+                        }
+                        Btn::DexPage(d) if self.dex_legends => {
+                            let pages = pokemon::legends_by_region().len() as i32;
+                            self.legend_page = (self.legend_page as i32 + d).rem_euclid(pages) as usize;
                         }
                         Btn::DexPage(d) => {
                             let pages = self.dex_pages.max(1) as i32;
@@ -6926,6 +7017,9 @@ impl App {
         self.dex_card = view == 1;
         self.dex_quests = view == 2;
         self.dex_bag = view == 3;
+        self.dex_legends = view == 4;
+        // The fullest region shows the view best.
+        self.legend_page = 8;
         self.dex_forms = false;
         self.dex_shiny = false;
         self.enter_tab();
@@ -7060,37 +7154,41 @@ impl App {
                 ("tab-bag", 4500)
             }
             23 => {
+                self.demo_open(Tab::Dex, 4);
+                ("tab-legends", 5000)
+            }
+            24 => {
                 self.demo_open(Tab::Game, 0);
                 ("tab-games", 4000)
             }
-            24 => {
+            25 => {
                 self.demo_open(Tab::Home, 0);
                 ("tab-home", 4500)
             }
-            25 => {
+            26 => {
                 self.demo_open(Tab::Controls, 0);
                 ("tab-controls", 4500)
             }
-            26 => {
+            27 => {
                 self.demo_open(Tab::Power, 0);
                 ("tab-power", 4000)
             }
-            27 => {
+            28 => {
                 self.expanded = false;
                 send(Event::Playback(false));
                 ("collapse", 3000)
             }
-            28 => {
+            29 => {
                 self.card = None;
                 self.queue.clear();
                 self.spawn_wild();
                 ("wild", 9000)
             }
-            29 => {
+            30 => {
                 self.throw_ball();
                 ("catch", 7000)
             }
-            30 => {
+            31 => {
                 self.card = None;
                 self.queue.clear();
                 if self.wild.is_some() {
@@ -7103,17 +7201,17 @@ impl App {
                 }
                 ("fishing", 4400)
             }
-            31 => {
+            32 => {
                 if self.fishing.as_ref().is_some_and(|f| f.bite.is_some()) {
                     self.reel_in();
                 }
                 ("reel", 3500)
             }
-            32 => {
+            33 => {
                 self.throw_ball();
                 ("catch-fish", 7000)
             }
-            33 => {
+            34 => {
                 self.card = None;
                 self.queue.clear();
                 self.wild = None;
@@ -7122,11 +7220,11 @@ impl App {
                 self.dex.egg = Some(crate::dex::Egg { species: "togepi".into(), shiny: false, minutes: 1, need: 1 });
                 ("egg", 2500)
             }
-            34 => {
+            35 => {
                 self.egg_minute();
                 ("hatch", 7000)
             }
-            35 => {
+            36 => {
                 self.card = None;
                 self.queue.clear();
                 send(Event::Weather(crate::demo::weather(true)));
@@ -9755,6 +9853,8 @@ pub fn run() -> Result<()> {
             fishing: None,
             fish_rect: None,
             dex_quests: false,
+            dex_legends: false,
+            legend_page: 0,
             hearts: Vec::new(),
             hatch: None,
             meeting: None,

@@ -537,6 +537,12 @@ Right-click the island → *Reload YASB theme & settings* after changing your th
     in a thunderstorm or strong wind. Their sprites, shinies and cries come from
     `tools\forms_sprites.py` (run after `national_sprites.py`; same rules: personal
     use).
+  - **Legends.** The Pokédex tab's **Legends** button: every legendary, mythical, Ultra
+    Beast and Paradox Pokémon (128, the Galarian birds included), one region a page from
+    Kanto to Paldea, with ‹ › to move between them. Each shows its name; the ones still to
+    catch are faint. The top line counts the region and all of them ("Kanto legends · 2 / 5
+    caught · 8 / 128 in all"), and the bottom line says how the missing ones turn up: the
+    weather and time-of-day roamers, special nights, and the legend quests that bring them.
   - **Poké Balls.** The Pokédex tab's **Bag** button shows your balls: Poké Balls never run
     out, **Great Balls** make a throw 1.5× as likely to hold, **Ultra Balls** 2×, and a
     **Master Ball** always catches. Click one to throw it next (you're back on Poké Balls

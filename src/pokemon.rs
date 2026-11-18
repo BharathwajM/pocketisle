@@ -588,6 +588,28 @@ pub fn legends() -> &'static [&'static str] {
     })
 }
 
+/// Every legendary, mythical, Ultra Beast and Paradox Pokémon, by region (one list for each
+/// of `REGIONS`), in National order; legendary regional forms (the Galarian birds) go with
+/// the region of their form.
+pub fn legends_by_region() -> &'static [Vec<&'static str>] {
+    static L: OnceLock<Vec<Vec<&'static str>>> = OnceLock::new();
+    L.get_or_init(|| {
+        let mut out: Vec<Vec<&'static str>> = vec![Vec::new(); REGIONS.len()];
+        for s in NATIONAL.iter().filter(|s| s.legend) {
+            out[(s.generation as usize).clamp(1, REGIONS.len()) - 1].push(s.name);
+        }
+        for s in FORMS.iter().filter(|s| regional(s) && s.legend) {
+            let i = match FORM_KINDS[s.form as usize] {
+                "Alola" => 6,
+                "Paldea" => 8,
+                _ => 7,
+            };
+            out[i].push(s.name);
+        }
+        out
+    })
+}
+
 /// What an Egg can hatch into.
 pub fn eggs() -> &'static [&'static str] {
     static E: OnceLock<Vec<&'static str>> = OnceLock::new();
@@ -1588,5 +1610,17 @@ mod tests {
         assert_eq!(pick(0.95, 0.45, 0.75), "Mew");
         assert_eq!(pick(0.12, 0.12, 0.14), "Umbreon");
         assert_eq!(pick(0.5, 0.3, 0.15), "Eevee");
+    }
+
+    #[test]
+    fn legends_by_region_cover_every_legend() {
+        let all = legends_by_region();
+        assert_eq!(all.len(), REGIONS.len());
+        // One page each: the Legends view fits 32.
+        assert!(all.iter().all(|l| !l.is_empty() && l.len() <= 32));
+        assert_eq!(&all[0][..], ["articuno", "zapdos", "moltres", "mewtwo", "mew"]);
+        assert!(all[7].contains(&"zapdos-galar") && all[2].contains(&"rayquaza") && all[8].contains(&"pecharunt"));
+        let n = NATIONAL.iter().filter(|s| s.legend).count() + 3;
+        assert_eq!(all.iter().map(|l| l.len()).sum::<usize>(), n);
     }
 }
