@@ -269,6 +269,23 @@ The pictures and the video above were recorded from it with ffmpeg.
   when a limit gets critical, runs out, or resets after being high. Green below 50%, gold
   from 50%, red from 70%.
 - **Notifications.** Windows toasts appear as a short card with the app's icon.
+- **Codes from SMS and email.** When a notification holds a one-time code ("Your verification
+  code is 482913", "G-482913", "123 456", or letters and digits like "code: K7P2QX"), the card
+  shows the code large with a copy button and stays
+  30 s, ahead of other cards. Click it and the code is copied, marked so Windows clipboard history
+  and the cloud clipboard don't keep it. Card endings, amounts, phone numbers, dates and times
+  aren't mistaken for codes, and codes are never written to the log. To get your phone's codes,
+  pair it with **Phone Link** (built into Windows; Android over Wi-Fi with Link to Windows,
+  iPhone over Bluetooth) and leave its notifications on: Phone Link shows them as Windows
+  notifications, which the island reads like any other. Email codes come the same way from any
+  mail app that shows Windows notifications (Outlook, or Gmail in Chrome or Edge with desktop
+  notifications on), or from your phone's mail app through Phone Link. Discount codes
+  ("use code SAVE20") are left alone. Keep the Phone Link window closed or minimised: while
+  it's open, Phone Link shows phone notifications only in its own window, not as Windows
+  notifications (it keeps running in the background when closed).
+- **Okta Verify sign-in requests** show as a "Sign-in request" card so you know to pick up your
+  phone. Approving stays on the phone, where Okta checks it really is you. For sign-in with no
+  phone at all, Okta Verify for Windows with FastPass uses Windows Hello, if your company has it on.
 - **Microphone and camera.** A green dot on the island while an app uses the camera, an
   orange one for the microphone (like the phone's), and a peek naming the app when it
   starts. Read from the same place as Windows' own privacy indicator (no permission

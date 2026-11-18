@@ -140,33 +140,57 @@ pub fn drag_out(hwnd: HWND, path: &Path) {
 
 /// Put text or a picture (CF_DIB bytes) back on the clipboard.
 pub fn put_text(own: HWND, text: &str) -> bool {
-    let mut bytes: Vec<u8> = text.encode_utf16().chain(std::iter::once(0)).flat_map(|u| u.to_le_bytes()).collect();
-    bytes.shrink_to_fit();
-    put(own, 13, &bytes)
+    put(own, &[(13, utf16z(text))])
+}
+
+/// Put a secret (a one-time code) on the clipboard, marked the way password managers mark
+/// theirs: Windows clipboard history and the cloud clipboard don't keep it, and clipboard
+/// viewers skip it.
+pub fn put_secret(own: HWND, text: &str) -> bool {
+    let reg = |name: &str| unsafe { RegisterClipboardFormatW(&HSTRING::from(name)) };
+    let no = 0u32.to_le_bytes().to_vec();
+    put(
+        own,
+        &[
+            (13, utf16z(text)),
+            (reg("ExcludeClipboardContentFromMonitorProcessing"), no.clone()),
+            (reg("CanIncludeInClipboardHistory"), no.clone()),
+            (reg("CanUploadToCloudClipboard"), no),
+        ],
+    )
+}
+
+fn utf16z(text: &str) -> Vec<u8> {
+    text.encode_utf16().chain(std::iter::once(0)).flat_map(|u| u.to_le_bytes()).collect()
 }
 
 pub fn put_dib(own: HWND, dib: &[u8]) -> bool {
-    put(own, 8, dib)
+    put(own, &[(8, dib.to_vec())])
 }
 
-fn put(own: HWND, format: u32, bytes: &[u8]) -> bool {
+fn put(own: HWND, items: &[(u32, Vec<u8>)]) -> bool {
     unsafe {
         if OpenClipboard(Some(own)).is_err() {
             return false;
         }
         let _ = EmptyClipboard();
-        let ok = (|| {
-            let g: HGLOBAL = GlobalAlloc(GMEM_MOVEABLE, bytes.len()).ok()?;
-            let p = GlobalLock(g) as *mut u8;
-            if p.is_null() {
-                return None;
-            }
-            std::ptr::copy_nonoverlapping(bytes.as_ptr(), p, bytes.len());
-            let _ = GlobalUnlock(g);
-            SetClipboardData(format, Some(HANDLE(g.0))).ok()?;
-            Some(())
-        })()
-        .is_some();
+        let ok = items.iter().all(|(format, bytes)| {
+            (|| {
+                if *format == 0 {
+                    return None;
+                }
+                let g: HGLOBAL = GlobalAlloc(GMEM_MOVEABLE, bytes.len()).ok()?;
+                let p = GlobalLock(g) as *mut u8;
+                if p.is_null() {
+                    return None;
+                }
+                std::ptr::copy_nonoverlapping(bytes.as_ptr(), p, bytes.len());
+                let _ = GlobalUnlock(g);
+                SetClipboardData(*format, Some(HANDLE(g.0))).ok()?;
+                Some(())
+            })()
+            .is_some()
+        });
         let _ = CloseClipboard();
         ok
     }

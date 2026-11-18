@@ -272,6 +272,9 @@ enum CardKind {
     Download(PathBuf),
     /// Click = open this web page.
     Link(String),
+    /// A one-time code from a notification (often a phone's, through Phone Link).
+    /// Click or its button = copy it, kept out of clipboard history.
+    Code(String),
 }
 
 struct Agent {
@@ -330,6 +333,8 @@ enum Btn {
     /// A download's card: show it in its folder, or keep it on the shelf.
     CardFolder,
     CardShelf,
+    /// A code's card: copy the code.
+    CardCopy,
     /// Controls: make this sound output the default.
     Output(usize),
     /// Home: tick a note, remove it, start typing a new one, clear the ticked ones.
@@ -569,6 +574,7 @@ const G_MOUSE: &str = "\u{f037d}";
 const G_PHONE: &str = "\u{f011c}";
 const G_HEAT: &str = "\u{f050f}";
 const G_SHIELD: &str = "\u{f0498}";
+const G_COPY: &str = "\u{f018f}";
 const G_KEYBOARD: &str = "\u{f030c}";
 const G_PEN: &str = "\u{f03eb}";
 const G_MONITOR: &str = "\u{f0379}";
@@ -2464,7 +2470,8 @@ impl App {
         }
         match &self.card {
             None => self.show_card(c),
-            Some(cur) if c.sticky && !cur.sticky => {
+            // Sticky cards and one-time codes go ahead of whatever is showing.
+            Some(cur) if (c.sticky || matches!(c.kind, CardKind::Code(_))) && !cur.sticky && !matches!(cur.kind, CardKind::Code(_)) => {
                 let old = self.card.take().unwrap();
                 self.queue.push_front(old);
                 self.show_card(c);
@@ -2504,7 +2511,8 @@ impl App {
 
     /// When the current card goes: its own time, or sooner when others are waiting.
     fn card_due(&self, c: &Card) -> Instant {
-        let ttl = if self.queue.is_empty() { c.ttl } else { c.ttl.min(Duration::from_millis(2500)) };
+        // A one-time code keeps its full time even with others waiting: you need to read it.
+        let ttl = if self.queue.is_empty() || matches!(c.kind, CardKind::Code(_)) { c.ttl } else { c.ttl.min(Duration::from_millis(2500)) };
         self.card_since + ttl
     }
 
@@ -2712,19 +2720,53 @@ impl App {
                     self.timeline = (end > 1.0).then_some((pos, end, Instant::now()));
                 }
                 Event::Notification { app, title, body, icon } => {
-                    self.push_card(Card {
-                        key: None,
-                        glyph: G_BELL,
-                        tint: self.theme.accent,
-                        app,
-                        title,
-                        body,
-                        icon,
-                        sticky: false,
-                        ttl: self.card_ttl(3.5),
-                        focus: Focus::No,
-                        kind: CardKind::Plain,
-                    });
+                    let texts = [app.as_str(), title.as_str(), body.as_str()];
+                    if let Some(code) = crate::otp::find_code(&texts) {
+                        // A one-time code: big, with a copy button, and around long enough to use.
+                        let from = if title.is_empty() { app.clone() } else { title.clone() };
+                        self.push_card(Card {
+                            key: Some("otp".into()),
+                            glyph: G_PHONE,
+                            tint: self.theme.accent,
+                            app: format!("Code from {from}"),
+                            title: spaced(&code),
+                            body: "Click to copy".into(),
+                            icon,
+                            sticky: false,
+                            ttl: self.card_ttl(30.0),
+                            focus: Focus::No,
+                            kind: CardKind::Code(code),
+                        });
+                    } else if crate::otp::is_okta_push(&texts) {
+                        // Approving stays on the phone, where Okta checks it really is you.
+                        self.push_card(Card {
+                            key: Some("okta".into()),
+                            glyph: G_SHIELD,
+                            tint: self.theme.accent,
+                            app: "Okta Verify".into(),
+                            title: "Sign-in request".into(),
+                            body: "Approve it on your phone, if it was you".into(),
+                            icon,
+                            sticky: false,
+                            ttl: self.card_ttl(25.0),
+                            focus: Focus::No,
+                            kind: CardKind::Plain,
+                        });
+                    } else {
+                        self.push_card(Card {
+                            key: None,
+                            glyph: G_BELL,
+                            tint: self.theme.accent,
+                            app,
+                            title,
+                            body,
+                            icon,
+                            sticky: false,
+                            ttl: self.card_ttl(3.5),
+                            focus: Focus::No,
+                            kind: CardKind::Plain,
+                        });
+                    }
                 }
                 Event::Usage(u) => self.on_usage(u),
                 Event::Privacy { mic, cam } => {
@@ -6058,6 +6100,16 @@ impl App {
 
     /// A short peek with an icon, a heading, a title and a line.
     #[allow(clippy::too_many_arguments)]
+    /// Copy a one-time code (kept out of clipboard history) and say so.
+    fn copy_code(&mut self, code: &str) {
+        self.next_card();
+        if crate::shelf::put_secret(self.hwnd, code) {
+            self.quick_card("otp", G_CHECK, self.theme.good, "Copied", &spaced(code), "Paste it with Ctrl+V · not kept in clipboard history", 2.0);
+        } else {
+            self.quick_card("otp", G_COPY, self.theme.subtext, "Couldn't copy", &spaced(code), "Another app is using the clipboard; try again", 3.0);
+        }
+    }
+
     fn quick_card(&mut self, key: &str, glyph: &'static str, tint: Rgba, app: &str, title: &str, body: &str, secs: f32) {
         let ttl = self.card_ttl(secs);
         self.push_card(Card {
@@ -6322,6 +6374,12 @@ impl App {
                     self.dirty = true;
                     return;
                 }
+                if let Some(CardKind::Code(code)) = self.card.as_ref().map(|c| c.kind.clone()) {
+                    self.copy_code(&code);
+                    self.schedule_expiry();
+                    self.dirty = true;
+                    return;
+                }
                 if let Some(c) = &self.card {
                     focus(c.focus);
                     match &c.kind {
@@ -6387,7 +6445,7 @@ impl App {
                             self.clip_page = 0;
                             self.save_clips();
                         }
-                        Btn::CardFolder | Btn::CardShelf => {}
+                        Btn::CardFolder | Btn::CardShelf | Btn::CardCopy => {}
                         Btn::Medal(_) => {}
                         Btn::Buddy(name) => self.set_buddy(name),
                         Btn::Fish => {
@@ -7831,7 +7889,17 @@ impl App {
         }
         let x = ic.x1 + 12.0 - slide(e_pic) + slide(e_txt);
         let download = matches!(kind, CardKind::Download(_));
-        let x1 = p.x1 - if kind == CardKind::Song { 44.0 } else if download { 86.0 } else { 18.0 };
+        let code = matches!(kind, CardKind::Code(_));
+        let x1 = p.x1 - if kind == CardKind::Song { 44.0 } else if download { 86.0 } else if code { 58.0 } else { 18.0 };
+        if code {
+            self.buttons.clear();
+            let a = e_txt.max(0.0);
+            let r = R::xywh(p.x1 - 48.0, p.cy() - 17.0, 34.0, 34.0);
+            let hot = self.hot == Some(Btn::CardCopy);
+            self.r.fill_round(r, 17.0, if hot { th.hover.a(a) } else { th.bg2.a(0.7 * a) });
+            self.r.icon(G_COPY, r, 15.0, th.accent.a(a));
+            self.buttons.push((r, Btn::CardCopy));
+        }
         if download {
             self.buttons.clear();
             let a = e_txt.max(0.0);
@@ -9231,6 +9299,23 @@ fn user_idle_ms() -> u32 {
 /// Is the island's weather place in the southern hemisphere (where the moon looks the other
 /// way round)? Worked out once.
 /// A Pokémon's types for a card: "Grass" or "Water/Ground".
+/// "482913" as "482 913", easier to read off the island.
+fn spaced(code: &str) -> String {
+    let n = code.chars().count();
+    if n >= 6 && n % 3 == 0 && code.chars().all(|c| c.is_ascii_digit()) {
+        let mut out = String::new();
+        for (i, c) in code.chars().enumerate() {
+            if i > 0 && i % 3 == 0 {
+                out.push(' ');
+            }
+            out.push(c);
+        }
+        out
+    } else {
+        code.to_string()
+    }
+}
+
 fn type_names(types: &[usize]) -> String {
     types.iter().map(|t| pokemon::TYPES[*t % 18].0).collect::<Vec<_>>().join("/")
 }

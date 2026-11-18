@@ -609,7 +609,7 @@ fn codex_rate_limits(exe: &PathBuf, via_cmd: bool) -> Result<Value, String> {
     };
     let mut send = |s: &str| writeln!(stdin, "{s}").and_then(|_| stdin.flush()).map_err(|_| "Codex CLI closed".to_string());
     let result = (|| {
-        send(r#"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"pocketisle","title":"Pocket Isle","version":"0.2.4"}}}"#)?;
+        send(r#"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"pocketisle","title":"Pocket Isle","version":"0.2.5"}}}"#)?;
         wait_for(1)?;
         send(r#"{"method":"initialized"}"#)?;
         send(r#"{"id":2,"method":"account/rateLimits/read"}"#)?;

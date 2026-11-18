@@ -31,6 +31,7 @@ mod national;
 mod notes;
 mod net;
 mod notify;
+mod otp;
 mod peeks;
 mod pokemon;
 mod privacy;
