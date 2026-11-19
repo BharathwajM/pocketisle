@@ -114,6 +114,7 @@ pub fn prepare() {
     let _ = std::fs::write(d.join("shelf.json"), serde_json::to_string_pretty(&shelf).unwrap_or_default());
     let _ = std::fs::write(d.join("Downloads").join("vacation-playlist.zip"), b"");
     let _ = std::fs::write(d.join("scenes.txt"), "");
+    let _ = std::fs::write(d.join("rects.txt"), "");
 }
 
 /// Note when a scene of the tour starts (unix ms), so stills can be cut from a recording.
@@ -121,6 +122,24 @@ pub fn scene(name: &str) {
     use std::io::Write;
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(dir().join("scenes.txt")) {
         let _ = writeln!(f, "{} {name}", now_ms());
+    }
+}
+
+/// Note where the island is on screen (pixels) whenever that changes, so stills cut from a
+/// recording can be cropped to it.
+pub fn rect(x0: i32, y0: i32, x1: i32, y1: i32) {
+    use std::io::Write;
+    use std::sync::Mutex;
+    static LAST: Mutex<[i32; 4]> = Mutex::new([0; 4]);
+    let r = [x0, y0, x1, y1];
+    if let Ok(mut last) = LAST.lock() {
+        if *last == r {
+            return;
+        }
+        *last = r;
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(dir().join("rects.txt")) {
+        let _ = writeln!(f, "{} {x0} {y0} {x1} {y1}", now_ms());
     }
 }
 

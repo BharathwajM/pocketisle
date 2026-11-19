@@ -7746,6 +7746,14 @@ impl App {
         // `p` is where the content goes; `body` is the whole surface (from the screen's edge).
         let p = R::new(cx - self.w.v / 2.0, self.neck, cx + self.w.v / 2.0, self.neck + self.h.v);
         let (body, rad, sh) = self.body();
+        if util::demo() {
+            // Where the island is on screen, for cropping the tour's stills.
+            let mut wr = RECT::default();
+            if unsafe { GetWindowRect(self.hwnd, &mut wr) }.is_ok() {
+                let s = self.scale;
+                crate::demo::rect(wr.left + (body.x0 * s).floor() as i32, wr.top + (body.y0 * s).floor() as i32, wr.left + (body.x1 * s).ceil() as i32, wr.top + (body.y1 * s).ceil() as i32);
+            }
+        }
         let (_, tw, thh, _) = self.target_cached();
         let closeness = 1.0 - (((self.w.v - tw).abs() + (self.h.v - thh).abs()) / 70.0).min(1.0);
         let a = self.alpha.v * closeness;

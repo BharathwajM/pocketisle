@@ -6,11 +6,11 @@ the time, the weather and a Pokémon. It grows into cards when something happens
 into a full panel when you hover over it. One ~2 MB exe, ~18 MB of memory, no web view.
 
 <p align="center">
-  <img src="docs/media/highlights.gif" width="504" alt="Pocket Isle: a Claude Code permission prompt, a song peek, the Music, System, Weather and Pokédex tabs, catching a wild Pokémon, fishing and an egg hatching">
+  <img src="docs/media/highlights.gif" width="544" alt="Pocket Isle: a Claude Code permission prompt, a song peek, the Music, System, Weather, Pokédex and Battle tabs, a battle, catching a wild Pokémon, fishing and an egg hatching">
 </p>
 
 <p align="center">
-  <b><a href="https://github.com/BharathwajM/pocketisle/raw/main/docs/media/tour.mp4">▶ Download the full tour video (MP4, 2 min 48 s, 2 MB, no narration)</a></b><br>
+  <b><a href="https://github.com/BharathwajM/pocketisle/raw/main/docs/media/tour.mp4">▶ Download the full tour video (MP4, 3 min 23 s, 2.4 MB, no narration)</a></b><br>
   <sub>Every picture and the video come from <code>pocketisle.exe demo</code>, which plays the tour by itself with made-up data.</sub>
 </p>
 
@@ -119,7 +119,7 @@ will send out.
 | | |
 |---|---|
 | <img src="docs/media/battle-thunderbolt.png" width="420" alt="Scizor using Thunderbolt"><br>**Real turn-based battles** with animations for every move type: lightning, flames, water, leaves and more. | <img src="docs/media/battle-flamethrower.png" width="420" alt="Scizor using Flamethrower"><br>Type matchups, critical hits and accuracy work like the games. Pokémon battle at the evolution stage that fits their level. |
-| <img src="docs/media/battle-moves.png" width="420" alt="Move buttons with PP"><br>**PP and stat changes**: each move shows its PP, and moves like Swords Dance raise stats (Atk ↑↑). | Every win gives XP and Poké Balls, more on Hard and Max (up to 2 Master Balls for beating a champion on Max). Lose to the Elite Four and the run starts over. |
+| <img src="docs/media/battle-moves.png" width="420" alt="Druddigon raising its stats with Hone Claws, move buttons with PP"><br>**PP and stat changes**: each move shows its PP, and moves like Hone Claws or Swords Dance raise stats (arrows and chips show it). | Every win gives XP and Poké Balls, more on Hard and Max (up to 2 Master Balls for beating a champion on Max). Lose to the Elite Four and the run starts over. |
 
 Pocket Isle does not include any Pokémon sprites or cries. `tools/national_sprites.py` downloads
 them for your own use (see [Credits](#credits)); without them, small hand-drawn pixel
