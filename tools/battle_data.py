@@ -1,9 +1,10 @@
-"""Build src/movedata.rs, the battle data: base stats, damaging moves and who learns which
-moves by level, for every Pokémon and form in src/national.rs.
+"""Build src/movedata.rs, the battle data: base stats, damaging moves and moves that raise or
+lower stats (with their PP and stat changes), and who learns which moves by level, for every
+Pokémon and form in src/national.rs.
 
-Uses three tables from PokeAPI's data (https://github.com/PokeAPI/pokeapi, data/v2/csv):
-pokemon_stats.csv, moves.csv and pokemon_moves.csv. Download them into a folder of their
-own, then:
+Uses five tables from PokeAPI's data (https://github.com/PokeAPI/pokeapi, data/v2/csv):
+pokemon_stats.csv, moves.csv, move_meta.csv, move_meta_stat_changes.csv and
+pokemon_moves.csv. Download them into a folder of their own, then:
 
     python tools/battle_data.py <csv folder> src/national.rs src/movedata.rs
 """
@@ -32,12 +33,28 @@ SKIP = {
     "steel-beam", "mind-blown", "dig", "fly", "dive", "bounce", "phantom-force",
     "shadow-force", "sky-drop", "geomancy", "freeze-shock", "ice-burn", "meteor-beam",
     "electro-shot", "outrage", "thrash", "petal-dance", "uproar", "rollout", "ice-ball",
-    "struggle", "snore", "spit-up", "natural-gift", "fling", "trump-card", "judgment",
+    "snore", "spit-up", "natural-gift", "fling", "trump-card", "judgment",
     "multi-attack", "techno-blast", "hidden-power", "weather-ball", "terrain-pulse",
     "revelation-dance", "raging-fury", "hyperspace-fury", "light-of-ruin", "head-smash",
     "shell-trap", "burn-up", "double-shock", "steel-roller", "poltergeist", "fusion-flare",
     "fusion-bolt", "relic-song", "dragon-energy", "water-spout", "eruption",
 }
+
+# Status moves that change stats in ways battles here can't follow (they need allies, swap
+# or copy stats, or do something else as well): left out.
+SKIP_STATUS = {
+    "acupressure", "aromatic-mist", "flower-shield", "rototiller", "gear-up", "magnetic-flux",
+    "coaching", "decorate", "howl", "growth", "spicy-extract", "jungle-healing", "flatter",
+    "swagger", "captivate", "tickle", "venom-drench", "memento", "parting-shot", "tearful-look",
+    "noble-roar", "baby-doll-eyes", "max-guard", "clangorous-soul", "no-retreat",
+    "fillet-away", "tidy-up", "victory-dance", "stuff-cheeks", "belly-drum", "curse",
+    "geomancy", "shelter",
+}
+
+# PokeAPI's stat ids for Attack…Evasion, in the order battles keep their stages.
+STAT_ORDER = {2: 0, 3: 1, 4: 2, 5: 3, 6: 4, 7: 5, 8: 6}
+# Moves that work on the user (or the user's side) rather than the target.
+USER_TARGETS = {4, 5, 7, 13}
 
 SPECIAL_NAMES = {
     "u-turn": "U-turn", "x-scissor": "X-Scissor", "double-edge": "Double-Edge",
@@ -62,16 +79,43 @@ def main(src, national, out):
     for r in csv.DictReader(open(os.path.join(src, "pokemon_stats.csv"), encoding="utf-8")):
         stats.setdefault(int(r["pokemon_id"]), {})[int(r["stat_id"])] = int(r["base_stat"])
 
+    meta = {}
+    for r in csv.DictReader(open(os.path.join(src, "move_meta.csv"), encoding="utf-8")):
+        meta[int(r["move_id"])] = (int(r["meta_category_id"]), int(r["stat_chance"] or 0))
+    changes = {}
+    for r in csv.DictReader(open(os.path.join(src, "move_meta_stat_changes.csv"), encoding="utf-8")):
+        st = STAT_ORDER.get(int(r["stat_id"]))
+        if st is not None and int(r["change"]) != 0:
+            changes.setdefault(int(r["move_id"]), []).append((st, int(r["change"])))
+
     moves = {}
     for r in csv.DictReader(open(os.path.join(src, "moves.csv"), encoding="utf-8")):
-        if r["damage_class_id"] not in ("2", "3") or not r["power"] or r["identifier"] in SKIP:
-            continue
+        mid = int(r["id"])
         t = TYPE_ORDER.get(int(r["type_id"]))
-        power = int(r["power"])
-        if t is None or power < 10 or int(r["id"]) >= 10000:
+        if t is None or mid >= 10000:
             continue
+        cat, chance = meta.get(mid, (0, 0))
+        sc = changes.get(mid, [])
         acc = int(r["accuracy"]) if r["accuracy"] else 0
-        moves[int(r["id"])] = (pretty(r["identifier"]), t, min(power, 250), acc, r["damage_class_id"] == "3", int(r["priority"]))
+        pp = int(r["pp"] or 0) or 10
+        prio = int(r["priority"])
+        if r["damage_class_id"] == "1":
+            # A status move that only raises or lowers stats (Swords Dance, Growl…).
+            if cat != 2 or not sc or r["identifier"] in SKIP_STATUS:
+                continue
+            on_user = int(r["target_id"]) in USER_TARGETS
+            moves[mid] = (pretty(r["identifier"]), t, 0, acc, False, prio, pp, sc, 100, on_user)
+            continue
+        if not r["power"] or r["identifier"] in SKIP:
+            continue
+        power = int(r["power"])
+        if power < 10:
+            continue
+        # A side effect on stats: lowering the target's (Psychic, Crunch…) or changing the
+        # user's own (Close Combat, Overheat, Power-Up Punch…).
+        if cat not in (6, 7):
+            sc = []
+        moves[mid] = (pretty(r["identifier"]), t, min(power, 250), acc, r["damage_class_id"] == "3", prio, pp, sc, chance or 100, cat == 7)
 
     # Level-up moves per Pokémon per game.
     learn = {}
@@ -107,16 +151,28 @@ def main(src, national, out):
             sets.append((lv, used[m]))
         rows.append((pid, [st.get(i, 50) for i in range(1, 7)], start, len(sets) - start))
 
+    # Struggle: what a Pokémon does once all its moves are out of PP.
+    if 165 in moves:
+        used.setdefault(165, len(used))
     order = sorted(used, key=used.get)
     with open(out, "w", encoding="utf-8", newline="\n") as f:
         f.write("//! Battle data, generated by `tools/battle_data.py` from PokeAPI's data: base stats,\n")
-        f.write("//! the damaging moves, and the moves each Pokémon learns by level.\n\n")
+        f.write("//! the damaging moves and the moves that raise or lower stats, and the moves each Pokémon\n")
+        f.write("//! learns by level.\n\n")
         f.write("pub struct Move {\n    pub name: &'static str,\n    /// Index into `pokemon::TYPES`.\n    pub t: u8,\n")
-        f.write("    pub power: u8,\n    /// 0 = never misses.\n    pub acc: u8,\n    pub special: bool,\n    pub prio: i8,\n}\n\n")
+        f.write("    /// 0 for a status move (it only changes stats).\n    pub power: u8,\n    /// 0 = never misses.\n    pub acc: u8,\n    pub special: bool,\n    pub prio: i8,\n")
+        f.write("    /// How many times it can be used in a battle.\n    pub pp: u8,\n")
+        f.write("    /// Stat stage changes: (Attack, Defense, Sp. Atk, Sp. Def, Speed, accuracy, evasion as\n")
+        f.write("    /// 0..7, how many stages).\n    pub stats: &'static [(u8, i8)],\n")
+        f.write("    /// The chance (%) of the stat changes.\n    pub chance: u8,\n")
+        f.write("    /// The stat changes are the user's own (Swords Dance, Close Combat), not the target's.\n    pub on_user: bool,\n}\n\n")
         f.write(f"pub static MOVES: [Move; {len(order)}] = [\n")
         for m in order:
-            n, t, p, a, s, pr = moves[m]
-            f.write(f'    Move {{ name: "{n}", t: {t}, power: {p}, acc: {a}, special: {"true" if s else "false"}, prio: {pr} }},\n')
+            n, t, p, a, s, pr, pp, st, ch, me = moves[m]
+            sts = "[" + ", ".join(f"({i}, {c})" for i, c in st) + "]"
+            if not st:
+                ch, me = 0, False
+            f.write(f'    Move {{ name: "{n}", t: {t}, power: {p}, acc: {a}, special: {"true" if s else "false"}, prio: {pr}, pp: {pp}, stats: &{sts}, chance: {ch}, on_user: {"true" if me else "false"} }},\n')
         f.write("];\n\n")
         f.write("/// (PokeAPI pokemon id, base HP, Attack, Defense, Sp. Atk, Sp. Def, Speed, first learnset\n")
         f.write("/// entry, how many), sorted by id.\n")

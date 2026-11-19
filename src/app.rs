@@ -2435,6 +2435,8 @@ impl App {
                 wx.map_or(base, |w| base.min(w))
             }
             Mode::Card if self.tide() => 42,
+            // A battle: every frame while something moves, its sprites at ~30 fps otherwise.
+            Mode::Expanded if self.tab == Tab::Battle && self.battle.is_some() => self.battle_wait_ms(),
             Mode::Expanded if self.tide() && self.cfg.animate_equalizer => 42,
             Mode::Decision => 100, // pulse and countdown
             Mode::Expanded => 250, // progress bar

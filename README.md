@@ -577,34 +577,65 @@ Right-click the island → *Reload YASB theme & settings* after changing your th
     **Ball** (the lower its HP, the likelier it holds; a Master Ball always does) or
     **Run**. Win and it's tired, so easier to catch on the pill (+40 XP, sometimes a Great
     Ball); lose and it runs off (+10 XP). A fainted Pokémon (Claude's limit used up) can't
-    battle. Status moves, abilities, held items and stat changes aren't in (yet). `battles`
-  - **Your team.** The Battle tab's bottom row: six Pokémon you've caught, picked for you
-    (your partner, your buddy and your strongest catches) until you click a slot and
-    choose. The picker lists everyone you've caught, strongest first; point at one to see
-    its types, stats and moves. This **Battle party** fights wild visitors and travelling
-    trainers at your team's level. The **League party** (the toggle above the slots) is a
-    second six for gyms, the Elite Four and the champion, and fights at the league's
-    level instead: two above the gym leader's, or two below the champion's for the Elite
-    Four and champion, so league battles stay a real challenge. It starts as a copy of
-    your Battle party. Everyone is healed after each battle (except between the Elite Four
-    and the champion).
+    battle. Each move has **PP** like the games (Flamethrower 15, Fire Blast 5…), shown on
+    its button; out of PP on every move, a Pokémon Struggles (and is hurt by the recoil).
+    **Stat changes** work like the games too, −6 to +6 stages: moves that only raise or
+    lower stats (Swords Dance, Dragon Dance, Calm Mind, Growl, Scary Face, Double Team…)
+    and attacks with a side effect (Close Combat lowers your Defense and Sp. Def, Overheat
+    your Sp. Atk; Psychic has a 10% chance to lower the foe's Sp. Def, Crunch 20% its
+    Defense). Raised and lowered stats show as chips in the info boxes ("Atk +2") with
+    arrows over the Pokémon, and reset when it switches out. Each Pokémon knows up to three
+    attacks plus its most useful stat move; trainers now and then power up first.
+    Burns, paralysis and other conditions, abilities and held items aren't in (yet). `battles`
+  - **Your team.** The Battle tab's bottom row: six of your catches, one per evolution
+    family, chosen at random (never legendaries, Megas or Gigantamax); **Shuffle** draws a
+    new six, or click a slot to choose one yourself. The picker lists everyone you've
+    caught, strongest first; point at one to see its types, stats and moves at the
+    party's level. This **Battle party** fights wild visitors and travelling trainers at
+    your team's level. The **League party** (the toggle above the slots) is a second six
+    for gyms, the Elite Four and the champion, and fights at the league's level instead:
+    two above the gym leader's, or two below the champion's for the Elite Four and
+    champion, so league battles stay a real challenge. Every Pokémon battles as the
+    stage of its family that fits the level, using the real evolution levels: your
+    Charizard is a Charmeleon at Lv 20 and a Charmander at Lv 14; a Charmander you caught
+    is a Charizard at Lv 40 (Pokémon that can evolve more than one way, like Eevee, stay
+    as they are; babies are never brought back). Everyone is healed after each battle
+    (except between the Elite Four and the champion).
   - **Pokémon League.** The Battle tab has a league for every region, Kanto to Paldea
     (‹ › to change region), with trainers of the island's own: eight **gyms**, each with a
     type and a badge (the Cinder Badge for fire, the Tide Badge for water…), taken in order;
-    then the **Elite Four** and the **champion** back to back, your team's HP carried from
-    one to the next. Teams come from the region's own Pokémon, of the gym's type, fully
-    evolved once the levels are high enough; the champion uses the region's strongest.
+    then the **Elite Four** and the **champion** back to back, your team's HP and PP
+    carried from one to the next. Teams come from the region's own Pokémon, of the gym's
+    type, each at the evolution stage its level calls for (a Lv 20 trainer has a
+    Charmeleon, never a Charizard); the champion uses the region's strongest.
     Levels rise through each region and from region to region: Kanto's first gym is Lv 12
-    and its champion Lv 68, Paldea's champion Lv 100. A badge gives XP and 3 Great Balls
-    (an Ultra Ball from the fifth gym on); each Elite Four win +250 XP; becoming champion
-    a Master Ball and +1000 XP. Lose to the Elite Four or the champion and the run starts
-    over. Beaten gyms can be battled again for XP. **Give up** ends a trainer battle as a loss.
+    and its champion Lv 68, Paldea's champion Lv 100. Every win gives XP and balls: a
+    badge 3 Great Balls (an Ultra Ball from the fifth gym on), each Elite Four win an
+    Ultra Ball and +250 XP, becoming champion a Master Ball and +1000 XP. Lose to the Elite
+    Four or the champion and the run starts over. Beaten gyms can be battled again (+80 XP
+    and a Great Ball); once you're a region's champion, its gym leaders bring their full
+    team of six to a rematch, not far below the champion's level (+200 XP and an Ultra
+    Ball). Point at any gym, Elite Four member or champion, even one you can't battle yet,
+    to see the team they'll send out. Each trainer has something to say when the battle
+    starts and when they lose, in keeping with their type, and each gym's badge shows on
+    its tile (an outline until you've earned it, a different shape for each gym). **Give
+    up** ends a trainer battle as a loss.
+  - **Difficulty.** **Normal / Hard / Max**, next to the region's name, for league and
+    travelling trainers. **Hard**: trainers are 5 levels higher and always pick their
+    hardest hit; ×1.5 XP and more balls (5 Great Balls for an early badge, 2 Ultra Balls
+    per Elite Four win, a Master Ball and 3 Ultra Balls for the champion). **Max**: 10
+    levels higher, and the smartest trainers (they take a sure knockout, use priority moves
+    when they're slower, and power up only when it's safe); ×2 XP and the best prizes (3
+    or 4 Ultra Balls a badge, 3 per Elite Four win, **2 Master Balls** and 5 Ultra Balls
+    for the champion). Beating a champion on Max marks the region *Max Champion ✓*. The
+    setting can't change during an Elite Four run, so its prizes match how it was played.
   - **Travelling trainers.** Three trainers a day (a Hiker, a Swimmer, a Chef…) with two or
-    three Pokémon near your team's level, on the Battle tab. Beat one: +40 XP plus their
-    level, and half the time a Great Ball. Trainer wins count for the *Win a battle*
+    three Pokémon near your team's level (at the right evolution stage for it), on the
+    Battle tab. Beat one: +40 XP plus their
+    level, and a Great Ball (more on Hard and Max). Trainer wins count for the *Win a battle*
     challenge too.
   - **Battle data.** Base stats and moves come from PokeAPI's data, built into
-    `src/movedata.rs` by `tools/battle_data.py` (see the script for the three tables it
+    `src/movedata.rs` by `tools/battle_data.py` (see the script for the five tables it
     reads).
   - **Weekend raids.** On Saturday and Sunday a strong legendary (the same one all
     weekend) raids the island: the weekend's first visitor, then now and then until it's

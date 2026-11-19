@@ -85,6 +85,10 @@ pub struct Dex {
     pub badges: Vec<String>,
     pub champions: Vec<String>,
     pub league_run: Option<LeagueRun>,
+    /// How tough league and travelling trainers are: 0 Normal, 1 Hard, 2 Max.
+    pub league_difficulty: u8,
+    /// The regions whose champion you've beaten on Max.
+    pub max_champions: Vec<String>,
     /// The day of the travelling trainers you've beaten (by number).
     pub travel_day: String,
     pub travel_beaten: Vec<u8>,
@@ -98,6 +102,8 @@ pub struct LeagueRun {
     pub region: usize,
     pub stage: usize,
     pub hp: Vec<u32>,
+    /// PP left, per Pokémon per move.
+    pub pp: Vec<Vec<u8>>,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone)]

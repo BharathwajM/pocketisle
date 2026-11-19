@@ -742,6 +742,64 @@ pub fn evolutions_of(name: &str) -> Vec<(&'static str, u32)> {
         .collect()
 }
 
+/// The one this evolves from (Charmeleon → Charmander, Alolan Ninetales → Alolan Vulpix,
+/// Perrserker → Galarian Meowth), if any, and the team level the evolution happens at.
+fn evolves_from(s: &'static Species) -> Option<(&'static Species, u32)> {
+    let e = EVOLUTIONS.iter().find(|e| e.1 == s.base)?;
+    let from = if s.form != 0 {
+        FORMS.iter().find(|f| f.base == e.0 && f.form == s.form)?
+    } else if REGIONAL_EVOS.contains(&s.id) {
+        FORMS.iter().find(|f| f.base == e.0 && evolutions_of(f.name).iter().any(|(n, _)| *n == s.name))?
+    } else {
+        NATIONAL.get(e.0 as usize - 1)?
+    };
+    Some((from, e.2 as u32))
+}
+
+/// The member of a Pokémon's family that fits `level`: a Charizard at Lv 20 is a Charmeleon
+/// and at Lv 10 a Charmander; a Charmander at Lv 40 is a Charizard (when it has only one way
+/// to evolve, so an Eevee stays an Eevee). Never back into a baby. A Mega or Gigantamax
+/// keeps its form from the Mega level on, if its plain form fits.
+pub fn stage_at(name: &str, level: u32) -> String {
+    let Some(orig) = species(name) else { return name.to_string() };
+    let special = orig.form >= FORM_MEGA;
+    let mut cur = if special { NATIONAL.get(orig.base as usize - 1).unwrap_or(orig) } else { orig };
+    while let Some((from, at)) = evolves_from(cur) {
+        if level >= at || from.baby {
+            break;
+        }
+        cur = from;
+    }
+    loop {
+        let evos = evolutions_of(cur.name);
+        let [(next, at)] = evos.as_slice() else { break };
+        match species(next) {
+            Some(n) if level >= *at => cur = n,
+            _ => break,
+        }
+    }
+    if special && cur.id == orig.base && level >= MEGA_LEVEL {
+        cur = orig;
+    }
+    if name.ends_with("-shiny") {
+        format!("{}-shiny", cur.name)
+    } else {
+        cur.name.to_string()
+    }
+}
+
+/// The first of a Pokémon's family (Charizard → Charmander), to tell families apart.
+pub fn family(name: &str) -> &'static str {
+    let Some(mut cur) = species(name) else { return "" };
+    if cur.form >= FORM_MEGA {
+        cur = NATIONAL.get(cur.base as usize - 1).unwrap_or(cur);
+    }
+    while let Some((from, _)) = evolves_from(cur) {
+        cur = from;
+    }
+    cur.name
+}
+
 /// Evolved Pokémon turn up less often than first stages.
 pub fn rarity(name: &str) -> f32 {
     match species(name).map(|s| s.stage) {
@@ -1348,6 +1406,25 @@ pub fn for_colour(rgb: [f32; 3]) -> &'static Mon {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stages_fit_the_level() {
+        assert_eq!(stage_at("charizard", 20), "charmeleon");
+        assert_eq!(stage_at("charizard", 10), "charmander");
+        assert_eq!(stage_at("charizard", 40), "charizard");
+        assert_eq!(stage_at("charmander", 40), "charizard");
+        assert_eq!(stage_at("charmander-shiny", 20), "charmeleon-shiny");
+        assert_eq!(stage_at("tyranitar", 14), "larvitar");
+        assert_eq!(stage_at("eevee", 57), "eevee");
+        assert_eq!(stage_at("vaporeon", 10), "eevee");
+        assert_eq!(stage_at("ninetales-alola", 10), "vulpix-alola");
+        assert_eq!(stage_at("pikachu", 5), "pikachu");
+        assert_eq!(stage_at("charizard-mega-x", 50), "charizard-mega-x");
+        assert_eq!(stage_at("charizard-mega-x", 20), "charmeleon");
+        assert_eq!(stage_at("lapras", 5), "lapras");
+        assert_eq!(family("charizard-mega-x"), "charmander");
+        assert_eq!(family("raichu"), "pichu");
+    }
 
     #[test]
     fn friendship() {

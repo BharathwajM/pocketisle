@@ -34,6 +34,10 @@ pub(super) enum Fx {
     Wind,
     Drain,
     Tackle,
+    /// A move that raises the user's stats (Swords Dance…).
+    Boost,
+    /// A move that lowers the target's stats (Growl…).
+    Drop,
 }
 
 /// Which animation a move gets.
@@ -42,6 +46,9 @@ pub(super) fn fx_of(m: u16) -> Fx {
     let n = mv.name.to_lowercase();
     let has = |words: &[&str]| words.iter().any(|w| n.contains(w));
     let ty = pokemon::TYPES[mv.t as usize % 18].0;
+    if mv.power == 0 {
+        return if mv.on_user { Fx::Boost } else { Fx::Drop };
+    }
     if has(&["claw", "slash", "scratch", "cut", "scissor", "swipe", "blade", "razor shell", "aerial ace", "false swipe", "psycho cut", "sacred sword", "secret sword", "x-scissor", "ceaseless edge", "kowtow"]) {
         Fx::Slash
     } else if has(&["close combat", "arm thrust", "barrage", "fury attack", "double hit", "triple", "comet punch", "dual chop", "bullet punch", "rapid spin"]) {
@@ -160,6 +167,7 @@ pub(super) fn offsets(m: u16, t: f32, a: (f32, f32), b: (f32, f32)) -> ((f32, f3
         Fx::Barrage => &[(HIT - 0.15, 6.0), (HIT, 6.0), (HIT + 0.15, 9.0)],
         Fx::Stars => &[(HIT - 0.08, 4.0), (HIT, 4.0), (HIT + 0.08, 6.0)],
         Fx::Drain | Fx::Rings => &[(HIT, 5.0)],
+        Fx::Boost | Fx::Drop => &[],
         _ => &[(HIT, 11.0)],
     };
     for &(th, d) in hits {
@@ -344,6 +352,27 @@ fn spray(seed: u32, n: u32, col: Rgba) -> Spray {
 const WHITE: Rgba = Rgba::rgb(255, 255, 255);
 
 impl App {
+    /// Arrows over a Pokémon whose stats change: rising through a warm glow, or sinking
+    /// through a cold one, `t` seconds in.
+    pub(super) fn stat_arrows(&mut self, c: (f32, f32), up: bool, t: f32, s: f32) {
+        let al = life(t, 0.0, 1.1);
+        if al <= 0.0 {
+            return;
+        }
+        let col = if up { Rgba::rgb(255, 120, 70) } else { Rgba::rgb(90, 150, 255) };
+        self.r.glow(c.0, c.1, 46.0 * s, col.a(0.5 * al));
+        for i in 0..6u32 {
+            let k = (t * 1.6 + rnd(i, 41)) % 1.0;
+            let x = c.0 + (i as f32 - 2.5) * 12.0 * s;
+            let y = if up { c.1 + 30.0 * s - 60.0 * s * k } else { c.1 - 30.0 * s + 60.0 * s * k };
+            let fade = al * (k * 4.0).min(1.0) * (1.0 - k);
+            let (h, w) = (9.0 * s, 6.0 * s);
+            let d = if up { -1.0 } else { 1.0 };
+            let head = [(x, y + d * h), (x - w, y), (x - w * 0.4, y), (x - w * 0.4, y - d * h * 0.9), (x + w * 0.4, y - d * h * 0.9), (x + w * 0.4, y), (x + w, y)];
+            self.r.poly(&head, col.mix(WHITE, 0.25).a(fade));
+        }
+    }
+
     /// Draw `sp` `e` seconds after it burst out of `c`.
     fn draw_spray(&mut self, sp: Spray, c: (f32, f32), e: f32, s: f32) {
         if e < 0.0 {
@@ -1059,6 +1088,29 @@ impl App {
                     }
                 }
             }
+            Fx::Boost => {
+                // It powers up: rings close in on it, then its stats rise.
+                for i in 0..3 {
+                    let k = (t - (0.1 + i as f32 * 0.12)) / 0.35;
+                    if (0.0..1.0).contains(&k) {
+                        self.r.ring(a.0, a.1, (50.0 - 40.0 * k) * s, light.a(0.9 * k), 3.0 * s);
+                    }
+                }
+                self.stat_arrows(a, true, t - 0.35, s);
+            }
+            Fx::Drop => {
+                // Waves wash over the target, then its stats sink.
+                let mid = if dir > 0.0 { 0.0 } else { PI };
+                for i in 0..3 {
+                    let k = (t - (0.1 + i as f32 * 0.1)) / 0.4;
+                    if (0.0..1.0).contains(&k) {
+                        let p = lerp(a, b, k);
+                        let r = (10.0 + 14.0 * k) * s;
+                        self.r.poly(&taper(&arc_path(p, r, r, mid - 0.9, mid + 0.9), 5.0 * s), light.a(1.0 - k * 0.5));
+                    }
+                }
+                self.stat_arrows(b, false, t - 0.5, s);
+            }
             Fx::Drain => {
                 // It's hit, then glowing orbs float back to the attacker, which glows as it heals.
                 let green = Rgba::rgb(140, 240, 120);
@@ -1128,5 +1180,7 @@ mod tests {
         assert_eq!(by_name("Giga Drain"), Fx::Drain);
         assert_eq!(by_name("Hyper Voice"), Fx::Sound);
         assert_eq!(by_name("Swift"), Fx::Stars);
+        assert_eq!(by_name("Swords Dance"), Fx::Boost);
+        assert_eq!(by_name("Growl"), Fx::Drop);
     }
 }

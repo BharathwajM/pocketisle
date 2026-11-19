@@ -31,6 +31,12 @@ pub(super) enum BtBtn {
     Remove,
     /// Show (and edit) the League party instead of the Battle party.
     Party(bool),
+    /// A new random party.
+    Shuffle,
+    /// Normal, Hard or Max for league and travelling trainers.
+    Difficulty(u8),
+    /// Pointing at a stage you can't battle yet: just shows its team.
+    Peek(u8),
 }
 
 /// Who you're battling.
@@ -94,7 +100,8 @@ impl BattleView {
         if let Some(s) = &self.cur {
             self.me_target = s.me.1 as f32;
             self.foe_target = s.foe.1 as f32;
-            if let Some(h) = s.hit {
+            let damaging = s.mv.is_none_or(|m| MOVES[m as usize].power > 0);
+            if let Some(h) = s.hit.filter(|_| damaging) {
                 self.hit = Some((h, Instant::now()));
             }
         }
@@ -136,6 +143,14 @@ impl BattleView {
         !self.queue.is_empty() || self.pending || self.cur.is_none() || self.at.elapsed().as_secs_f32() < wait
     }
 
+    /// Something on the field is moving: a line playing, an HP bar sliding, a flinch.
+    fn moving(&self) -> bool {
+        self.busy()
+            || (self.me_hp - self.me_target).abs() > 0.01
+            || (self.foe_hp - self.foe_target).abs() > 0.01
+            || self.hit.is_some_and(|(_, at)| at.elapsed().as_secs_f32() < 0.5)
+    }
+
     fn ready(&self) -> bool {
         !self.busy() && self.b.outcome.is_none()
     }
@@ -164,7 +179,58 @@ fn region_key(region: usize, gym: usize) -> String {
     format!("{} {}", crate::national::REGIONS[region % 9], gym + 1)
 }
 
+/// A badge's outline, a different shape for each gym: a hexagon, a diamond, a star, a
+/// shield…
+fn badge_shape(c: (f32, f32), r: f32, gym: usize) -> Vec<(f32, f32)> {
+    use std::f32::consts::{PI, TAU};
+    let ring = |n: usize, inner: f32, rot: f32| -> Vec<(f32, f32)> {
+        let k = if inner > 0.0 { 2 * n } else { n };
+        (0..k)
+            .map(|i| {
+                let rr = if inner > 0.0 && i % 2 == 1 { r * inner } else { r };
+                let ang = rot + i as f32 * TAU / k as f32 - PI / 2.0;
+                (c.0 + ang.cos() * rr, c.1 + ang.sin() * rr)
+            })
+            .collect()
+    };
+    match gym % 8 {
+        0 => ring(6, 0.0, PI / 6.0),
+        1 => ring(4, 0.0, 0.0),
+        2 => ring(5, 0.5, 0.0),
+        3 => vec![(c.0 - r * 0.85, c.1 - r * 0.8), (c.0 + r * 0.85, c.1 - r * 0.8), (c.0 + r * 0.85, c.1 + r * 0.1), (c.0, c.1 + r), (c.0 - r * 0.85, c.1 + r * 0.1)],
+        4 => ring(8, 0.0, PI / 8.0),
+        5 => ring(4, 0.45, 0.0),
+        6 => ring(6, 0.6, 0.0),
+        _ => ring(3, 0.0, 0.0),
+    }
+}
+
+/// What a stat move does, for its button: "Atk ↑↑", "Foe Def ↓".
+fn stat_summary(mv: &crate::movedata::Move) -> String {
+    let parts: Vec<String> = mv
+        .stats
+        .iter()
+        .take(2)
+        .map(|(st, ch)| {
+            let arrows = if *ch > 0 { "↑" } else { "↓" }.repeat(ch.unsigned_abs().min(3) as usize);
+            format!("{} {arrows}", crate::battle::STAT_SHORT[*st as usize % 7])
+        })
+        .collect();
+    let text = parts.join(" ");
+    if mv.on_user || text.is_empty() {
+        text
+    } else {
+        format!("Foe {text}")
+    }
+}
+
 impl App {
+    /// How long to wait for the next frame in a battle: none while it moves (animations
+    /// need every frame), ~30 fps for the sprites while it waits for you.
+    pub(super) fn battle_wait_ms(&self) -> u32 {
+        if self.battle.as_ref().is_some_and(|v| v.moving()) { 0 } else { 33 }
+    }
+
     // ---------- starting ----------
 
     /// The party shown on the tab (Battle or League).
@@ -203,10 +269,61 @@ impl App {
         team
     }
 
+    /// Six of your catches at random, one per family (not legendaries, Megas or Gigantamax:
+    /// pick those yourself).
+    fn random_party(&self) -> Vec<String> {
+        let mut pool: Vec<&String> = self
+            .dex
+            .caught
+            .keys()
+            .filter(|n| pokemon::species(n).is_some_and(|s| s.form < 5 && !s.legend))
+            .collect();
+        pool.sort();
+        let mut out: Vec<String> = Vec::new();
+        while out.len() < 6 && !pool.is_empty() {
+            let n = pool.swap_remove((rand01() * pool.len() as f32) as usize % pool.len());
+            if !out.iter().any(|o| pokemon::family(o) == pokemon::family(n)) {
+                out.push(n.clone());
+            }
+        }
+        out
+    }
+
+    /// Give each party six random catches until it has some.
+    fn fill_parties(&mut self) {
+        let mut changed = false;
+        if self.dex.team.iter().all(|n| pokemon::species(n).is_none()) {
+            self.dex.team = self.random_party();
+            changed = !self.dex.team.is_empty();
+        }
+        if self.dex.league_team.iter().all(|n| pokemon::species(n).is_none()) {
+            self.dex.league_team = self.random_party();
+            changed |= !self.dex.league_team.is_empty();
+        }
+        if changed {
+            self.dex.save();
+        }
+    }
+
+    /// The level a party is shown at: your team's level for the Battle party, the next
+    /// league battle's for the League party.
+    fn shown_level(&self, league: bool) -> u32 {
+        if !league {
+            return self.dex.level();
+        }
+        let region = self.league_region % 9;
+        let next = (0..8).find(|g| !self.dex.badges.contains(&region_key(region, *g))).unwrap_or(league::ELITE);
+        league::party_level(region, next)
+    }
+
+    /// A party as it battles at `lv`: each Pokémon at the stage that fits the level.
+    fn party_mons(&self, league: bool, lv: u32) -> Vec<Mon> {
+        self.party(league).iter().map(|n| Mon::new(&pokemon::stage_at(n, lv), lv)).collect()
+    }
+
     /// The Battle party at your team's level.
     fn team_mons(&self) -> Vec<Mon> {
-        let lv = self.dex.level();
-        self.party(false).iter().map(|n| Mon::new(n, lv)).collect()
+        self.party_mons(false, self.dex.level())
     }
 
     fn set_party(&mut self, team: Vec<String>) {
@@ -235,6 +352,7 @@ impl App {
             self.dirty = true;
             return;
         }
+        self.fill_parties();
         let lv = self.dex.level();
         let Some(w) = self.wild.as_ref() else { return };
         let (raid, legend) = (w.raid, w.legend);
@@ -256,9 +374,18 @@ impl App {
         self.open_battle(b, if raid { Foe::Raid } else { Foe::Wild });
     }
 
+    /// A gym you've beaten in a region you're the champion of: its leader's full rematch team.
+    fn is_rematch(&self, region: usize, stage: usize) -> bool {
+        stage < league::ELITE
+            && self.dex.badges.contains(&region_key(region, stage))
+            && self.dex.champions.iter().any(|c| c == crate::national::REGIONS[region % 9])
+    }
+
     fn start_league(&mut self, region: usize, stage: usize) {
-        let lv = league::party_level(region, stage);
-        let mut me: Vec<Mon> = self.party(true).iter().map(|n| Mon::new(n, lv)).collect();
+        self.fill_parties();
+        let rematch = self.is_rematch(region, stage);
+        let lv = if rematch { league::rematch_party_level(region, stage) } else { league::party_level(region, stage) };
+        let mut me: Vec<Mon> = self.party_mons(true, lv);
         if stage >= league::ELITE {
             match self.dex.league_run.as_ref() {
                 Some(r) if r.region == region && r.stage == stage => {
@@ -267,9 +394,18 @@ impl App {
                             m.hp = (*h).min(m.max_hp());
                         }
                     }
+                    if r.pp.len() == me.len() {
+                        for (m, pp) in me.iter_mut().zip(&r.pp) {
+                            if pp.len() == m.pp.len() {
+                                for (a, b) in m.pp.iter_mut().zip(pp) {
+                                    *a = (*b).min(*a);
+                                }
+                            }
+                        }
+                    }
                 }
                 _ => {
-                    self.dex.league_run = Some(crate::dex::LeagueRun { region, stage: league::ELITE, hp: me.iter().map(|m| m.hp).collect() });
+                    self.dex.league_run = Some(crate::dex::LeagueRun { region, stage: league::ELITE, hp: me.iter().map(|m| m.hp).collect(), pp: me.iter().map(|m| m.pp.clone()).collect() });
                     self.dex.save();
                 }
             }
@@ -277,7 +413,11 @@ impl App {
         if me.iter().all(|m| m.fainted()) {
             return;
         }
-        let b = Battle::new(Kind::Trainer, me, league::stage_mons(region, stage), &league::trainer_name(region, stage));
+        let diff = self.difficulty();
+        let mut b = Battle::new(Kind::Trainer, me, league::stage_mons(region, stage, rematch, league::bonus(diff)), &league::trainer_name(region, stage));
+        b.ai = diff;
+        let (hi, bye) = league::lines(region, stage);
+        b.lines = (hi.to_string(), bye.to_string());
         self.open_battle(b, Foe::League(region, stage));
     }
 
@@ -286,11 +426,36 @@ impl App {
         format!("{:04}-{:02}-{:02}", now.date.y, now.date.m, now.date.d)
     }
 
+    /// The difficulty for league and travelling trainers (0 Normal, 1 Hard, 2 Max).
+    fn difficulty(&self) -> u8 {
+        self.dex.league_difficulty.min(2)
+    }
+
+    /// Put balls from a win in the bag; returns them in words.
+    fn give_prize(&mut self, win: league::Win) -> String {
+        let balls = league::prize(win, self.difficulty());
+        for (b, n) in &balls {
+            self.dex.bag.add(*b, *n);
+        }
+        league::prize_words(&balls)
+    }
+
+    /// "Max · " before a win's details on Hard and Max.
+    fn diff_tag(&self) -> String {
+        match self.difficulty() {
+            0 => String::new(),
+            d => format!("{} · ", league::DIFFICULTY[d as usize]),
+        }
+    }
+
     pub(super) fn start_traveller(&mut self, i: usize) {
-        let list = league::travellers(&self.today(), self.dex.level());
+        self.fill_parties();
+        let diff = self.difficulty();
+        let list = league::travellers(&self.today(), self.dex.level(), league::bonus(diff));
         let Some(t) = list.get(i) else { return };
         let foe = t.team.iter().map(|(n, l)| Mon::new(n, *l)).collect();
-        let b = Battle::new(Kind::Trainer, self.team_mons(), foe, &format!("{} {}", t.title, t.name));
+        let mut b = Battle::new(Kind::Trainer, self.team_mons(), foe, &format!("{} {}", t.title, t.name));
+        b.ai = diff;
         self.open_battle(b, Foe::Traveller(i));
     }
 
@@ -372,15 +537,12 @@ impl App {
                     self.dex.travel_beaten.push(i as u8);
                     self.dex.battles_won += 1;
                     let lv = v.b.foe.mons.iter().map(|m| m.level).max().unwrap_or(1);
-                    let xp = 40 + lv;
-                    let ball = rand01() < 0.5;
-                    if ball {
-                        self.dex.bag.add(1, 1);
-                    }
+                    let xp = league::scaled_xp(40 + lv, self.difficulty());
+                    let prize = self.give_prize(league::Win::Traveller);
                     self.dex.save();
-                    let found = if ball { " · they gave you a Great Ball" } else { "" };
                     let tint = self.theme.good;
-                    self.quick_card("battle", G_SWORDS, tint, "Battle", &format!("You beat {who}!"), &format!("+{xp} XP{found}"), 5.0);
+                    let body = format!("{}+{xp} XP · they gave you {prize}", self.diff_tag());
+                    self.quick_card("battle", G_SWORDS, tint, "Battle", &format!("You beat {who}!"), &body, 5.0);
                     self.gain_xp(xp);
                     self.progress(|c| c.kind == "battle");
                 } else {
@@ -414,31 +576,46 @@ impl App {
             return;
         }
         self.dex.battles_won += 1;
+        let diff = self.difficulty();
+        let tag = self.diff_tag();
         let (title, body, xp) = if stage < league::ELITE {
             let key = region_key(region, stage);
-            if self.dex.badges.contains(&key) {
-                (format!("You beat {who} again"), "A rematch: +80 XP".to_string(), 80)
+            if self.is_rematch(region, stage) {
+                let xp = league::scaled_xp(200, diff);
+                let prize = self.give_prize(league::Win::FullTeam);
+                (format!("You beat {who}'s full team!"), format!("{tag}A champion's rematch · {prize} · +{xp} XP"), xp)
+            } else if self.dex.badges.contains(&key) {
+                let xp = league::scaled_xp(80, diff);
+                let prize = self.give_prize(league::Win::Again);
+                (format!("You beat {who} again"), format!("{tag}A rematch · {prize} · +{xp} XP"), xp)
             } else {
                 self.dex.badges.push(key);
                 let have = (0..8).filter(|g| self.dex.badges.contains(&region_key(region, *g))).count();
-                let (prize, ball) = if stage >= 4 { ("an Ultra Ball", 2) } else { ("3 Great Balls", 1) };
-                self.dex.bag.add(ball, if ball == 1 { 3 } else { 1 });
-                let xp = 150 + 25 * stage as u32;
-                let next = if have == 8 { format!("All 8 {rname} badges: the Elite Four awaits!") } else { format!("{have}/8 {rname} badges") };
-                (format!("You earned the {}!", league::badge_name(league::stage_type(region, stage))), format!("{who} beaten · {next} · {prize} · +{xp} XP"), xp)
+                let prize = self.give_prize(league::Win::Badge { late: stage >= 4 });
+                let xp = league::scaled_xp(150 + 25 * stage as u32, diff);
+                let next = if have == 8 { "all 8 badges: the Elite Four awaits!".to_string() } else { format!("{have}/8 {rname} badges") };
+                (format!("You earned the {}!", league::badge_name(league::stage_type(region, stage))), format!("{tag}{next} · {prize} · +{xp} XP"), xp)
             }
         } else if stage < league::CHAMPION {
             let hp: Vec<u32> = v.b.me.mons.iter().map(|m| m.hp).collect();
-            self.dex.league_run = Some(crate::dex::LeagueRun { region, stage: stage + 1, hp });
+            let pp: Vec<Vec<u8>> = v.b.me.mons.iter().map(|m| m.pp.clone()).collect();
+            self.dex.league_run = Some(crate::dex::LeagueRun { region, stage: stage + 1, hp, pp });
             let next = league::trainer_name(region, stage + 1);
-            (format!("You beat {who}!"), format!("Next: {next} · your team's HP carries over · +250 XP"), 250)
+            let xp = league::scaled_xp(250, diff);
+            let prize = self.give_prize(league::Win::Elite);
+            (format!("You beat {who}!"), format!("{tag}Next: {next}, HP and PP carry over · {prize} · +{xp} XP"), xp)
         } else {
             self.dex.league_run = None;
             if !self.dex.champions.iter().any(|c| c == rname) {
                 self.dex.champions.push(rname.to_string());
             }
-            self.dex.bag.add(3, 1);
-            (format!("You're the {rname} Champion!"), format!("{who} beaten · a Master Ball and +1000 XP · {} of 9 regions", self.dex.champions.len()), 1000)
+            if diff == 2 && !self.dex.max_champions.iter().any(|c| c == rname) {
+                self.dex.max_champions.push(rname.to_string());
+            }
+            let xp = league::scaled_xp(1000, diff);
+            let prize = self.give_prize(league::Win::Champion);
+            let title = if diff == 2 { format!("{rname} Champion on Max!") } else { format!("You're the {rname} Champion!") };
+            (title, format!("{tag}{prize} · +{xp} XP · {} of 9 regions", self.dex.champions.len()), xp)
         };
         self.dex.save();
         let tint = self.theme.good;
@@ -479,8 +656,13 @@ impl App {
             }
             BtBtn::Pick(n) => {
                 if let Some(i) = self.team_pick.take() {
+                    // Swap the slot's Pokémon for it (and drop any of the same family).
                     let mut team = self.battle_team();
-                    team.retain(|t| t.trim_end_matches("-shiny") != n);
+                    if i < team.len() {
+                        team.remove(i);
+                    }
+                    let fam = pokemon::family(n);
+                    team.retain(|t| pokemon::family(t) != fam);
                     let i = i.min(team.len());
                     team.insert(i, n.to_string());
                     team.truncate(6);
@@ -488,6 +670,18 @@ impl App {
                 }
             }
             BtBtn::Party(l) => self.league_party = l,
+            // Fixed while an Elite Four run is going, so its prizes match how it was played.
+            BtBtn::Difficulty(d) if self.dex.league_run.is_none() => {
+                self.dex.league_difficulty = d.min(2);
+                self.dex.save();
+            }
+            BtBtn::Difficulty(_) | BtBtn::Peek(_) => {}
+            BtBtn::Shuffle => {
+                let team = self.random_party();
+                if !team.is_empty() {
+                    self.set_party(team);
+                }
+            }
             BtBtn::PickPage(d) => self.pick_page = (self.pick_page as i32 + d).max(0) as usize,
             BtBtn::Remove => {
                 if let Some(i) = self.team_pick.take() {
@@ -535,6 +729,8 @@ impl App {
                 hit: Some(true),
                 eff: 1.0,
                 mv: Some(m as u16),
+                stat: None,
+                boosts: ([0; 7], [0; 7]),
             });
         }
         self.dirty = true;
@@ -580,6 +776,7 @@ impl App {
     }
 
     pub(super) fn draw_battle_tab(&mut self, x0: f32, x1: f32, y: f32) {
+        self.fill_parties();
         if self.battle.is_some() {
             self.draw_battle(x0, x1, y);
         } else if self.team_pick.is_some() {
@@ -589,7 +786,7 @@ impl App {
         }
     }
 
-    fn info_box(&mut self, r: R, m: &Mon, hp: f32, show_num: bool, dots: Option<&[Mon]>) {
+    fn info_box(&mut self, r: R, m: &Mon, hp: f32, show_num: bool, dots: Option<&[Mon]>, boosts: &[i8; 7]) {
         let th = self.theme.clone();
         self.r.fill_round(r, 10.0, th.bg.a(0.72));
         self.r.text(&m.display(), R::new(r.x0 + 10.0, r.y0 + 4.0, r.x1 - 50.0, r.y0 + 22.0), 12.0, 700, th.text, Align::Left);
@@ -609,6 +806,25 @@ impl App {
                 let c = if t.fainted() { th.subtext.a(0.3) } else { Rgba::rgb(240, 80, 64) };
                 self.r.circle(r.x0 + 14.0 + i as f32 * 11.0, r.y1 - 8.0, 3.5, c);
             }
+        }
+        // Raised and lowered stats: "Atk +2" in green, "Def −1" in red (yours on the left,
+        // the foe's on the right).
+        let chips: Vec<(String, bool)> = boosts
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| **b != 0)
+            .map(|(i, b)| (format!("{} {}{}", crate::battle::STAT_SHORT[i], if *b > 0 { "+" } else { "−" }, b.abs()), *b > 0))
+            .collect();
+        let row = R::new(r.x0 + 10.0, r.y1 - 15.0, r.x1 - 10.0, r.y1 - 1.0);
+        let mut x = if show_num { row.x0 } else { row.x1 };
+        for (text, up) in chips {
+            let w = self.r.measure(&text, 9.0, 700) + 8.0;
+            let (cx0, cx1) = if show_num { (x, x + w) } else { (x - w, x) };
+            let chip = R::new(cx0, row.y0, cx1, row.y1 - 1.0);
+            let c = if up { th.good } else { th.bad };
+            self.r.fill_round(chip, 4.0, c.a(0.2));
+            self.r.text(&text, chip, 9.0, 700, c, Align::Center);
+            x = if show_num { cx1 + 3.0 } else { cx0 - 3.0 };
         }
     }
 
@@ -678,9 +894,16 @@ impl App {
             let (a, b, size) = if foe_hit { (me_c, foe_c, 70.0) } else { (foe_c, me_c, 84.0) };
             self.draw_move_fx(mv, t, a, b, size);
         }
+        if let Some((on_foe, up)) = v.cur.as_ref().and_then(|c| c.stat) {
+            let t = v.at.elapsed().as_secs_f32();
+            let (c, size) = if on_foe { (foe_c, 70.0) } else { (me_c, 84.0) };
+            self.stat_arrows(c, up, t, (size / 70.0f32).clamp(0.7, 1.5));
+        }
         let dots = (v.b.kind == Kind::Trainer).then(|| v.b.foe.mons.clone());
-        self.info_box(R::new(x0 + 10.0, y + 10.0, x0 + 232.0, y + 10.0 + if dots.is_some() { 52.0 } else { 40.0 }), &foe, v.foe_hp, false, dots.as_deref());
-        self.info_box(R::new(x1 - 232.0, y + 104.0, x1 - 10.0, y + 154.0), &me, v.me_hp, true, None);
+        let (my_b, foe_b) = v.cur.as_ref().map_or(([0; 7], [0; 7]), |c| c.boosts);
+        let tall = dots.is_some() || foe_b.iter().any(|b| *b != 0);
+        self.info_box(R::new(x0 + 10.0, y + 10.0, x0 + 232.0, y + 10.0 + if tall { 52.0 } else { 40.0 }), &foe, v.foe_hp, false, dots.as_deref(), &foe_b);
+        self.info_box(R::new(x1 - 232.0, y + 104.0, x1 - 10.0, y + 154.0), &me, v.me_hp, true, None, &my_b);
         // The line.
         let msg = R::new(x0, y + 174.0, x1, y + 206.0);
         self.r.fill_round(msg, 10.0, th.bg2.a(0.55));
@@ -763,12 +986,20 @@ impl App {
             };
             let mv = &MOVES[m as usize];
             let col = type_col(mv.t as usize);
-            let hot = ready && self.hot == Some(Btn::Bt(BtBtn::Move(i as u8)));
-            self.r.fill_round(r, 10.0, if hot { col.a(0.42) } else { col.a(if ready { 0.22 } else { 0.1 }) });
+            let (pp, max) = (mine.pp.get(i).copied().unwrap_or(0), mv.pp);
+            // Out of PP everywhere: any button Struggles.
+            let usable = ready && (pp > 0 || mine.out_of_pp());
+            let hot = usable && self.hot == Some(Btn::Bt(BtBtn::Move(i as u8)));
+            self.r.fill_round(r, 10.0, if hot { col.a(0.42) } else { col.a(if usable { 0.22 } else { 0.1 }) });
             self.r.fill_round(R::new(r.x0, r.y0, r.x0 + 5.0, r.y1), 2.5, col);
-            self.r.text(mv.name, R::new(r.x0 + 12.0, r.y0 + 3.0, r.x1 - 6.0, r.y0 + 22.0), 12.0, 700, th.text.a(if ready { 1.0 } else { 0.5 }), Align::Left);
-            let eff = crate::quest::effect(mv.t as usize, &foe_types);
-            let (word, wc) = if eff >= 2.0 {
+            self.r.text(mv.name, R::new(r.x0 + 12.0, r.y0 + 3.0, r.x1 - 56.0, r.y0 + 22.0), 12.0, 700, th.text.a(if usable { 1.0 } else { 0.5 }), Align::Left);
+            let ppc = if pp == 0 { th.bad } else if pp * 4 <= max { Rgba::rgb(240, 170, 60) } else { th.subtext };
+            self.r.text(&format!("PP {pp}/{max}"), R::new(r.x1 - 70.0, r.y0 + 4.0, r.x1 - 8.0, r.y0 + 21.0), 9.5, 700, ppc, Align::Right);
+            let eff = if mv.power == 0 { 1.0 } else { crate::quest::effect(mv.t as usize, &foe_types) };
+            let what = stat_summary(mv);
+            let (word, wc) = if !what.is_empty() && mv.power == 0 {
+                (what.as_str(), th.subtext)
+            } else if eff >= 2.0 {
                 ("Super effective", th.good)
             } else if eff <= 0.0 {
                 ("No effect", th.bad)
@@ -777,10 +1008,14 @@ impl App {
             } else {
                 ("", th.subtext)
             };
-            let sub = format!("{} · {}{}", pokemon::TYPES[mv.t as usize % 18].0, mv.power, if mv.special { " sp." } else { "" });
+            let sub = if mv.power == 0 {
+                format!("{} · Status", pokemon::TYPES[mv.t as usize % 18].0)
+            } else {
+                format!("{} · {}{}", pokemon::TYPES[mv.t as usize % 18].0, mv.power, if mv.special { " sp." } else { "" })
+            };
             self.r.text(&sub, R::new(r.x0 + 12.0, r.y0 + 21.0, r.x1 - 6.0, r.y1 - 3.0), 10.0, 500, th.subtext, Align::Left);
             self.r.text(word, R::new(r.x0 + 12.0, r.y0 + 21.0, r.x1 - 8.0, r.y1 - 3.0), 10.0, 700, wc, Align::Right);
-            if ready {
+            if usable {
                 self.buttons.push((r, Btn::Bt(BtBtn::Move(i as u8))));
             }
         }
@@ -814,10 +1049,35 @@ impl App {
         }
         self.r.text(&format!("{rname} League"), R::new(x0 + 28.0, y, x0 + 148.0, y + 24.0), 12.5, 700, th.text, Align::Center);
         let next_stage = if badges < 8 { have.iter().position(|b| !b).unwrap_or(0) } else { league::ELITE };
-        let right = format!("{badges}/8 badges{} · League party Lv {} next", if champ { " · Champion ✓" } else { "" }, league::party_level(region, next_stage));
-        self.r.text(&right, R::new(x0 + 180.0, y, x1 - 2.0, y + 24.0), 10.5, 600, if champ { th.good } else { th.subtext }, Align::Right);
+        // Normal / Hard / Max.
+        let diff = self.difficulty();
+        let bonus = league::bonus(diff);
+        let locked = self.dex.league_run.is_some();
+        let dx = x0 + 184.0;
+        let seg = 46.0;
+        self.r.fill_round(R::new(dx, y, dx + 3.0 * seg, y + 24.0), 10.0, th.bg2.a(0.6));
+        for (d, name) in league::DIFFICULTY.iter().enumerate() {
+            let r = R::new(dx + d as f32 * seg, y, dx + (d + 1) as f32 * seg, y + 24.0);
+            let on = d as u8 == diff;
+            let hot = !locked && self.hot == Some(Btn::Bt(BtBtn::Difficulty(d as u8)));
+            let col = [th.good, th.accent, th.bad][d];
+            if on {
+                self.r.fill_round(r.inset(2.0), 8.0, col.a(if locked { 0.45 } else { 0.9 }));
+            } else if hot {
+                self.r.fill_round(r.inset(2.0), 8.0, th.hover);
+            }
+            self.r.text(name, r, 10.5, 700, if on { th.bg } else { th.text.a(if locked { 0.45 } else { 1.0 }) }, Align::Center);
+            if !locked {
+                self.buttons.push((r, Btn::Bt(BtBtn::Difficulty(d as u8))));
+            }
+        }
+        let maxed = self.dex.max_champions.iter().any(|c| c == rname);
+        let crown = if maxed { " · Max Champion ✓" } else if champ { " · Champion ✓" } else { "" };
+        let right = format!("{badges}/8 badges{crown} · you Lv {}", league::party_level(region, next_stage));
+        self.r.text(&right, R::new(dx + 3.0 * seg + 6.0, y, x1 - 2.0, y + 24.0), 10.5, 600, if champ { th.good } else { th.subtext }, Align::Right);
         y += 30.0;
         // The eight gyms, in order.
+        let mut tiles: Vec<(usize, R)> = Vec::new();
         let gap = 6.0;
         let gw = (x1 - x0 - 3.0 * gap) / 4.0;
         let next = have.iter().position(|b| !b).unwrap_or(8);
@@ -825,13 +1085,22 @@ impl App {
             let r = R::xywh(x0 + (g % 4) as f32 * (gw + gap), y + (g / 4) as f32 * (46.0 + gap), gw, 46.0);
             let open = g <= next;
             let t = league::stage_type(region, g);
-            self.stage_tile(r, g, &format!("{}. {}", g + 1, league::LEAGUE[region].gyms[g].0), &format!("{t} · Lv {}", league::stage_level(region, g)), type_col(type_index(t)), done, open, g == next);
+            let sub = if champ && done { format!("{t} · Rematch Lv {}", (league::rematch_level(region, g) + bonus).min(100)) } else { format!("{t} · Lv {}", (league::stage_level(region, g) + bonus).min(100)) };
+            self.stage_tile(r, g, &format!("{}. {}", g + 1, league::LEAGUE[region].gyms[g].0), &sub, type_col(type_index(t)), done, open, g == next);
+            tiles.push((g, r));
         }
         y += 2.0 * 46.0 + gap + 8.0;
         let run = self.dex.league_run.as_ref().filter(|r| r.region == region).map(|r| r.stage);
-        let lvls = format!("Lv {}–{}", league::stage_level(region, league::ELITE), league::stage_level(region, league::CHAMPION));
-        let e4 = if badges == 8 { format!("Elite Four & Champion · {lvls} · back to back, no healing in between") } else { format!("Elite Four & Champion · {lvls} · after all 8 badges") };
+        let lvls = format!("Lv {}–{}", (league::stage_level(region, league::ELITE) + bonus).min(100), (league::stage_level(region, league::CHAMPION) + bonus).min(100));
+        let heading = "Elite Four & Champion";
+        let e4 = if badges == 8 { format!("{heading} · {lvls} · back to back, no healing") } else { format!("{heading} · {lvls} · after all 8 badges") };
         self.r.text(&e4, R::new(x0 + 2.0, y, x1, y + 16.0), 10.5, 600, th.subtext, Align::Left);
+        let note = if locked {
+            "Difficulty is set until this Elite Four run ends".to_string()
+        } else {
+            ["Hard and Max: tougher trainers, bigger prizes", "Hard: trainers +5 Lv, sharper, more prizes", "Max: trainers +10 Lv, smartest, the best prizes"][diff as usize].to_string()
+        };
+        self.r.text(&note, R::new(x0 + 2.0, y, x1 - 2.0, y + 16.0), 10.0, 600, [th.subtext, th.accent, th.bad][diff as usize], Align::Right);
         y += 18.0;
         let ew = (x1 - x0 - 4.0 * gap) / 5.0;
         for i in 0..5 {
@@ -843,6 +1112,7 @@ impl App {
             let beaten = run.is_some_and(|r| s < r) || (champ && run.is_none());
             let open = badges == 8 && s == cur;
             self.stage_tile(r, s, name, t, col, beaten, open, open);
+            tiles.push((s, r));
         }
         y += 46.0 + 8.0;
         // Travelling trainers.
@@ -850,7 +1120,7 @@ impl App {
         let beaten: Vec<u8> = if self.dex.travel_day == today { self.dex.travel_beaten.clone() } else { Vec::new() };
         self.r.text("Travelling trainers today", R::new(x0 + 2.0, y, x1, y + 16.0), 10.5, 600, th.subtext, Align::Left);
         y += 18.0;
-        let list = league::travellers(&today, lv);
+        let list = league::travellers(&today, lv, bonus);
         let tw = (x1 - x0 - 2.0 * gap) / 3.0;
         for (i, t) in list.iter().enumerate() {
             let r = R::xywh(x0 + i as f32 * (tw + gap), y, tw, 44.0);
@@ -879,14 +1149,20 @@ impl App {
             self.r.text(label, r, 10.0, 600, if on { th.bg } else { th.text }, Align::Center);
             self.buttons.push((r, Btn::Bt(BtBtn::Party(l))));
         }
+        let shuffle = R::xywh(x0 + 186.0, y - 2.0, 64.0, 19.0);
+        let hot = self.hot == Some(Btn::Bt(BtBtn::Shuffle));
+        self.r.fill_round(shuffle, 9.5, if hot { th.hover } else { th.bg2.a(0.6) });
+        self.r.text("Shuffle", shuffle, 10.0, 600, th.text, Align::Center);
+        self.buttons.push((shuffle, Btn::Bt(BtBtn::Shuffle)));
+        let plv = self.shown_level(self.league_party);
         let note = if self.league_party {
-            "Gyms, Elite Four & champions · at the league's level".to_string()
+            format!("Regional League · Lv {plv} next")
         } else {
             format!("Wild visitors & travelling trainers · Lv {lv}")
         };
-        self.r.text(&note, R::new(x0 + 190.0, y, x1 - 2.0, y + 16.0), 10.0, 500, th.subtext, Align::Right);
+        self.r.text(&note, R::new(x0 + 256.0, y, x1 - 2.0, y + 16.0), 10.0, 500, th.subtext, Align::Right);
         y += 20.0;
-        let team = self.battle_team();
+        let team: Vec<String> = self.battle_team().iter().map(|n| pokemon::stage_at(n, plv)).collect();
         let sw = (x1 - x0 - 5.0 * gap) / 6.0;
         for i in 0..6 {
             let r = R::xywh(x0 + i as f32 * (sw + gap), y, sw, 50.0);
@@ -903,6 +1179,14 @@ impl App {
             }
             self.buttons.push((r, Btn::Bt(BtBtn::Slot(i.min(team.len()) as u8))));
         }
+        // Pointing at a gym, Elite Four member or champion: who they'll send out.
+        let peek = match self.hot {
+            Some(Btn::Bt(BtBtn::Stage(s) | BtBtn::Peek(s))) => Some(s as usize),
+            _ => None,
+        };
+        if let Some((s, r)) = peek.and_then(|p| tiles.iter().find(|t| t.0 == p).copied()) {
+            self.draw_peek(r, region, s, x0, x1);
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -914,14 +1198,64 @@ impl App {
         let fill = if hot { th.hover } else if next { th.accent.a(0.2) } else if beaten { th.good.a(0.14) } else { th.bg2.a(if can { 0.55 } else { 0.25 }) };
         self.r.fill_round(r, 10.0, fill);
         let a = if can || beaten { 1.0 } else { 0.45 };
-        self.r.circle(r.x0 + 17.0, r.cy(), 10.0, col.a(a));
-        if beaten {
-            self.r.icon(G_CHECK, R::xywh(r.x0 + 7.0, r.cy() - 10.0, 20.0, 20.0), 12.0, th.bg);
+        if stage < league::ELITE {
+            // The gym's badge: just an outline until you've earned it.
+            let c = (r.x0 + 17.0, r.cy());
+            let shape = badge_shape(c, 11.0, stage);
+            if beaten {
+                self.r.poly(&badge_shape(c, 12.5, stage), col.mix(Rgba::rgb(0, 0, 0), 0.35));
+                self.r.poly(&shape, col);
+                self.r.poly(&badge_shape((c.0 - 2.0, c.1 - 2.0), 4.5, stage), Rgba::rgb(255, 255, 255).a(0.7));
+            } else {
+                self.r.poly(&shape, col.a(0.15 * a));
+                let mut ring = shape.clone();
+                ring.push(shape[0]);
+                let segs: Vec<(f32, f32, f32, f32)> = ring.windows(2).map(|w| (w[0].0, w[0].1, w[1].0, w[1].1)).collect();
+                self.r.lines(&segs, col.a(0.8 * a), 1.6);
+            }
+        } else {
+            self.r.circle(r.x0 + 17.0, r.cy(), 10.0, col.a(a));
+            if beaten {
+                self.r.icon(G_CHECK, R::xywh(r.x0 + 7.0, r.cy() - 10.0, 20.0, 20.0), 12.0, th.bg);
+            }
         }
         self.r.text(name, R::new(r.x0 + 32.0, r.y0 + 5.0, r.x1 - 4.0, r.y0 + 23.0), 11.0, 700, th.text.a(a), Align::Left);
         self.r.text(sub, R::new(r.x0 + 32.0, r.y0 + 22.0, r.x1 - 4.0, r.y1 - 5.0), 9.5, 500, if next { th.accent } else { th.subtext.a(a) }, Align::Left);
         if can {
             self.buttons.push((r, btn));
+        } else {
+            self.buttons.push((r, Btn::Bt(BtBtn::Peek(stage as u8))));
+        }
+    }
+
+    /// The team a stage's trainer will use, over its tile: sprites, names and levels.
+    fn draw_peek(&mut self, tile: R, region: usize, stage: usize, x0: f32, x1: f32) {
+        let th = self.theme.clone();
+        let rematch = self.is_rematch(region, stage);
+        let team = league::team(region, stage, rematch, league::bonus(self.difficulty()));
+        if team.is_empty() {
+            return;
+        }
+        let cell = 58.0;
+        let w = team.len() as f32 * cell + 20.0;
+        let h = 94.0;
+        let px = (tile.cx() - w / 2.0).clamp(x0, (x1 - w).max(x0));
+        let below = stage < 4;
+        let py = if below { tile.y1 + 4.0 } else { tile.y0 - h - 4.0 };
+        let panel = R::xywh(px, py, w, h);
+        self.r.fill_round(panel.inset(-1.0), 12.0, th.subtext.a(0.35));
+        self.r.fill_round(panel, 11.0, th.bg);
+        let who = league::trainer_name(region, stage);
+        let kind = if rematch { "rematch team" } else { "team" };
+        let diff = self.difficulty();
+        let tag = if diff > 0 { format!(" · {}", league::DIFFICULTY[diff as usize]) } else { String::new() };
+        self.r.text(&format!("{who}'s {kind}{tag}"), R::new(px + 10.0, py + 5.0, px + w - 10.0, py + 21.0), 10.5, 700, th.text, Align::Left);
+        for (i, (n, lv)) in team.iter().enumerate() {
+            let cx = px + 10.0 + cell * (i as f32 + 0.5);
+            self.small_thumb(n, cx, py + 42.0, 34.0, 1.0);
+            let c = R::new(cx - cell / 2.0 + 1.0, py + 60.0, cx + cell / 2.0 - 1.0, py + 75.0);
+            self.r.text(&pokemon::pretty(n), c, 9.0, 600, th.text, Align::Center);
+            self.r.text(&format!("Lv {lv}"), R::new(c.x0, c.y1 - 1.0, c.x1, c.y1 + 14.0), 9.0, 500, th.subtext, Align::Center);
         }
     }
 
@@ -949,10 +1283,10 @@ impl App {
         self.pick_page = self.pick_page.min(pages - 1);
         let cw = (x1 - x0) / cols as f32;
         let ch = 36.0;
-        let lv = self.dex.level();
+        let lv = self.shown_level(self.league_party);
         for (i, &n) in all.iter().skip(self.pick_page * per).take(per).enumerate() {
             let cell = R::xywh(x0 + (i % cols) as f32 * cw, y + (i / cols) as f32 * ch, cw, ch).inset(2.0);
-            let on = team.iter().any(|t| t.trim_end_matches("-shiny") == n);
+            let on = team.iter().any(|t| pokemon::family(t) == pokemon::family(n));
             let hot = self.hot == Some(Btn::Bt(BtBtn::Pick(n)));
             self.r.fill_round(cell, 8.0, if hot { th.hover } else if on { th.accent.a(0.2) } else { th.bg2.a(0.5) });
             self.small_thumb(n, cell.cx(), cell.cy(), 28.0, 1.0);
@@ -964,9 +1298,9 @@ impl App {
         y += rows as f32 * ch + 6.0;
         let hover = match self.hot {
             Some(Btn::Bt(BtBtn::Pick(n))) => {
-                let m = Mon::new(n, lv);
+                let m = Mon::new(&pokemon::stage_at(n, lv), lv);
                 let mv: Vec<&str> = m.moves.iter().map(|i| MOVES[*i as usize].name).collect();
-                format!("{} · {} · HP {} Atk {} Def {} SpA {} SpD {} Spe {} · {}", pokemon::pretty(n), type_names(&m.types), m.stats[0], m.stats[1], m.stats[2], m.stats[3], m.stats[4], m.stats[5], mv.join(", "))
+                format!("{} Lv {lv} · {} · HP {} Atk {} Def {} SpA {} SpD {} Spe {} · {}", pokemon::pretty(&m.name), type_names(&m.types), m.stats[0], m.stats[1], m.stats[2], m.stats[3], m.stats[4], m.stats[5], mv.join(", "))
             }
             _ => format!("Strongest first · page {} of {pages}", self.pick_page + 1),
         };
