@@ -109,6 +109,18 @@ Megas and Gigantamax forms, and a Shiny Pokédex), sorted by number or type.
 | <img src="docs/media/tab-trainer.png" width="420" alt="Trainer card"><br>**Trainer card**: days played, catches, shinies, eggs, your best combo, special days and 17 medals. At the bottom, your **buddy** and its friendship: petting and time together raise it, and some Pokémon only evolve when happy (Eevee becomes Espeon by day, Umbreon at night). | <img src="docs/media/tab-quests.png" width="420" alt="Legend quests"><br>**Legend quests**: ten quests that each bring a legendary, like catching the three birds for Lugia or fishing up 15 for Palkia. |
 | <img src="docs/media/tab-bag.png" width="420" alt="The bag"><br>**Bag**: Poké, Great, Ultra and Master Balls, three daily challenges, mass outbreaks, weekend raids and battles. | Also: catch combos that raise shiny odds, special days (Halloween ghosts, full-moon Clefairy, meteor-shower Jirachi, Christmas lights), rare weather legends, and Claude's 5-hour limit as your Pokémon's HP. |
 
+<img src="docs/media/tab-battle.png" width="560" alt="The Battle tab: a league with badges, the difficulty switch and a gym's team">
+
+**The Battle tab**: a Pokémon League for every region (eight gyms with their badges, the Elite
+Four and a champion), travelling trainers each day, and your two parties. Switch between
+**Normal, Hard and Max**: tougher trainers, bigger prizes. Point at a gym to see the team it
+will send out.
+
+| | |
+|---|---|
+| <img src="docs/media/battle-thunderbolt.png" width="420" alt="Scizor using Thunderbolt"><br>**Real turn-based battles** with animations for every move type: lightning, flames, water, leaves and more. | <img src="docs/media/battle-flamethrower.png" width="420" alt="Scizor using Flamethrower"><br>Type matchups, critical hits and accuracy work like the games. Pokémon battle at the evolution stage that fits their level. |
+| <img src="docs/media/battle-moves.png" width="420" alt="Move buttons with PP"><br>**PP and stat changes**: each move shows its PP, and moves like Swords Dance raise stats (Atk ↑↑). | Every win gives XP and Poké Balls, more on Hard and Max (up to 2 Master Balls for beating a champion on Max). Lose to the Elite Four and the run starts over. |
+
 Pocket Isle does not include any Pokémon sprites or cries. `tools/national_sprites.py` downloads
 them for your own use (see [Credits](#credits)); without them, small hand-drawn pixel
 Pokémon stand in.
