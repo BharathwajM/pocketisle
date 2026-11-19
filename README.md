@@ -94,7 +94,7 @@ catches give the team XP, and Pokémon evolve as the team levels up.
 
 | | |
 |---|---|
-| <img src="docs/media/wild.png" width="262" alt="A wild Combee by Eevee"><br>**Wild Pokémon** wander onto the pill every 5–15 minutes. Who comes depends on the real weather, the time of day and the season: water types in the rain, ghosts at night, no fire types in a storm. | <img src="docs/media/catch.png" width="262" alt="A Poké Ball wobbling"><br>**Catch them** by clicking when the ring is small (*Nice!*, *Great!*, *Excellent!*). Some want to battle first: the real type chart decides who wins. |
+| <img src="docs/media/wild.png" width="262" alt="A wild Combee by Eevee"><br>**Wild Pokémon** wander onto the pill every 5–15 minutes. Who comes depends on the real weather, the time of day and the season: water types in the rain, ghosts at night, no fire types in a storm. | <img src="docs/media/catch.png" width="262" alt="A Poké Ball wobbling"><br>**Catch them** by clicking when the ring is small (*Nice!*, *Great!*, *Excellent!*). Some want to battle first: a real turn-based battle on the Battle tab, which also has a Pokémon League for every region. |
 | <img src="docs/media/fishing.png" width="285" alt="Fishing rod and bobber with a bite"><br>**Fishing**: cast a line beside your Pokémon and click the bobber when the **!** shows. Some Pokémon only bite. | <img src="docs/media/reel.png" width="259" alt="Psyduck reeled in"><br>…then catch what you reeled in like any visitor. |
 | <img src="docs/media/egg.png" width="277" alt="An egg beside Eevee"><br>**Eggs** turn up now and then and hatch after a couple of hours at your PC. | <img src="docs/media/hatch.png" width="272" alt="The egg hatching"><br>Babies and egg-only Pokémon hatch from them. |
 
@@ -560,18 +560,52 @@ Right-click the island → *Reload YASB theme & settings* after changing your th
     times better. A card says when one starts, and the Pokédex tab shows how long is left.
     `outbreaks`
   - **Battles.** About one visitor in five (never a legendary or a shiny) wants to battle
-    first: crossed swords show over it. Click it and your Pokémon fights it on the pill.
-    The real type chart decides it, like the games: Fire beats Grass, Water beats Fire,
-    Grass beats Water, Electric does nothing to Ground, and so on, dual types included.
-    A clear type advantage (super effective while the other is not very effective back,
-    like Fire on Grass) **wins 9 times in 10**, and a clear disadvantage loses 9 in 10. Super
-    effective one way only wins about 3 in 4, and an even match is a coin toss; there your
-    team's level adds or takes off up to a tenth. In the fight, a super effective
-    hit lands big with **Super effective!** over whoever's hit, a weak one small with *Not
-    very effective…*, and the card says the matchup ("Fire on Grass: super effective").
-    Win: +40 XP (+10 more if your attack was super effective),
-    sometimes a Great Ball, and the visitor is tired, so it's easier to catch. Lose: +10 XP
-    and it runs off. A fainted Pokémon (Claude's limit used up) can't battle. `battles`
+    first: crossed swords show over it. Click it and the island opens on the **Battle** tab
+    for a real turn-based battle, your team against it. Each Pokémon has its real base
+    stats and up to four real moves it learns by levelling up (the strongest it knows at
+    your team's level, preferring different types). Damage works like the games: level,
+    Attack against Defense (Sp. Atk against Sp. Def for special moves), half again for a
+    move of its own type, the real type chart (dual types included), critical hits and a
+    little luck; the faster Pokémon moves first, and moves like Quick Attack go before
+    others. Each move button shows its type and power and says if it's **Super effective**
+    against the foe. Moves are animated like the games: Dragon Claw rakes glowing claw marks
+    across the foe, Thunderbolt crackles at it with a flash, Flamethrower pours fire and
+    leaves it burning, Crunch snaps fangs shut, Shadow Ball flies and bursts, Earthquake
+    shakes the field and cracks the ground, Ice Beam freezes it in a block of ice that
+    shatters; attackers lunge or power up, targets get knocked back, and the field takes on
+    the move's colour. **Switch** to another team member (it uses your turn), throw a
+    **Ball** (the lower its HP, the likelier it holds; a Master Ball always does) or
+    **Run**. Win and it's tired, so easier to catch on the pill (+40 XP, sometimes a Great
+    Ball); lose and it runs off (+10 XP). A fainted Pokémon (Claude's limit used up) can't
+    battle. Status moves, abilities, held items and stat changes aren't in (yet). `battles`
+  - **Your team.** The Battle tab's bottom row: six Pokémon you've caught, picked for you
+    (your partner, your buddy and your strongest catches) until you click a slot and
+    choose. The picker lists everyone you've caught, strongest first; point at one to see
+    its types, stats and moves. This **Battle party** fights wild visitors and travelling
+    trainers at your team's level. The **League party** (the toggle above the slots) is a
+    second six for gyms, the Elite Four and the champion, and fights at the league's
+    level instead: two above the gym leader's, or two below the champion's for the Elite
+    Four and champion, so league battles stay a real challenge. It starts as a copy of
+    your Battle party. Everyone is healed after each battle (except between the Elite Four
+    and the champion).
+  - **Pokémon League.** The Battle tab has a league for every region, Kanto to Paldea
+    (‹ › to change region), with trainers of the island's own: eight **gyms**, each with a
+    type and a badge (the Cinder Badge for fire, the Tide Badge for water…), taken in order;
+    then the **Elite Four** and the **champion** back to back, your team's HP carried from
+    one to the next. Teams come from the region's own Pokémon, of the gym's type, fully
+    evolved once the levels are high enough; the champion uses the region's strongest.
+    Levels rise through each region and from region to region: Kanto's first gym is Lv 12
+    and its champion Lv 68, Paldea's champion Lv 100. A badge gives XP and 3 Great Balls
+    (an Ultra Ball from the fifth gym on); each Elite Four win +250 XP; becoming champion
+    a Master Ball and +1000 XP. Lose to the Elite Four or the champion and the run starts
+    over. Beaten gyms can be battled again for XP. **Give up** ends a trainer battle as a loss.
+  - **Travelling trainers.** Three trainers a day (a Hiker, a Swimmer, a Chef…) with two or
+    three Pokémon near your team's level, on the Battle tab. Beat one: +40 XP plus their
+    level, and half the time a Great Ball. Trainer wins count for the *Win a battle*
+    challenge too.
+  - **Battle data.** Base stats and moves come from PokeAPI's data, built into
+    `src/movedata.rs` by `tools/battle_data.py` (see the script for the three tables it
+    reads).
   - **Weekend raids.** On Saturday and Sunday a strong legendary (the same one all
     weekend) raids the island: the weekend's first visitor, then now and then until it's
     dealt with. It has three shields down its side; each battle you win breaks one, and

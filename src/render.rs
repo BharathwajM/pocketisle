@@ -363,6 +363,25 @@ impl Renderer {
         }
     }
 
+    /// A filled shape through these points (closed back to the first).
+    pub fn poly(&mut self, pts: &[(f32, f32)], c: Rgba) {
+        if pts.len() < 3 || c.a <= 0.0 {
+            return;
+        }
+        let v: Vec<Vector2> = pts.iter().map(|(x, y)| Vector2 { X: *x, Y: *y }).collect();
+        unsafe {
+            let Ok(g) = self.factory.CreatePathGeometry() else { return };
+            let Ok(sink) = g.Open() else { return };
+            sink.BeginFigure(v[0], D2D1_FIGURE_BEGIN_FILLED);
+            sink.AddLines(&v[1..]);
+            sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+            if sink.Close().is_err() {
+                return;
+            }
+            self.dc.FillGeometry(&g, self.paint(c), None);
+        }
+    }
+
     /// A filled line graph of `vals` (0..1), newest on the right, `cap` samples wide.
     pub fn sparkline(&mut self, r: R, vals: &[f32], cap: usize, c: Rgba) {
         if vals.len() < 2 || cap < 2 {

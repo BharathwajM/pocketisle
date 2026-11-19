@@ -75,6 +75,29 @@ pub struct Dex {
     pub buddy_minutes: u32,
     pub pet_day: String,
     pub pet_today: u32,
+    /// Your battle team (sprite names, up to six; empty = picked for you).
+    pub team: Vec<String>,
+    /// Your League party, for gyms, the Elite Four and champions (empty = the same as your
+    /// team). It battles at the league's levels, not your team's.
+    pub league_team: Vec<String>,
+    /// Gym badges ("Kanto 1" … "Kanto 8"), the regions you're champion of, and an Elite Four
+    /// run in progress.
+    pub badges: Vec<String>,
+    pub champions: Vec<String>,
+    pub league_run: Option<LeagueRun>,
+    /// The day of the travelling trainers you've beaten (by number).
+    pub travel_day: String,
+    pub travel_beaten: Vec<u8>,
+}
+
+/// The Elite Four and champion, back to back: the region, who's next (8–12) and your team's
+/// HP carried from battle to battle.
+#[derive(Serialize, Deserialize, Default, Clone)]
+#[serde(default)]
+pub struct LeagueRun {
+    pub region: usize,
+    pub stage: usize,
+    pub hp: Vec<u32>,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone)]

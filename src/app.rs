@@ -11,6 +11,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
 
+mod battle_fx;
+mod battle_ui;
+
 use windows::core::{w, Result, HSTRING, PCWSTR, PWSTR};
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Direct2D::ID2D1Bitmap1;
@@ -289,6 +292,7 @@ struct Agent {
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Btn {
+    Bt(battle_ui::BtBtn),
     Prev,
     PlayPause,
     Next,
@@ -416,15 +420,16 @@ enum Tab {
     Weather,
     Shelf,
     Dex,
+    Battle,
     Game,
     Home,
     Controls,
     Power,
 }
 
-const TABS: [Tab; 11] = [Tab::Media, Tab::Usage, Tab::Calendar, Tab::System, Tab::Weather, Tab::Shelf, Tab::Dex, Tab::Game, Tab::Home, Tab::Controls, Tab::Power];
+const TABS: [Tab; 12] = [Tab::Media, Tab::Usage, Tab::Calendar, Tab::System, Tab::Weather, Tab::Shelf, Tab::Dex, Tab::Battle, Tab::Game, Tab::Home, Tab::Controls, Tab::Power];
 /// Tabs from this index on sit at the right, like the bar's right-hand widgets.
-const RIGHT_TABS: usize = 8;
+const RIGHT_TABS: usize = 9;
 const TAB_H: f32 = 30.0;
 /// Width of the permission prompt.
 const DEC_W: f32 = 430.0;
@@ -455,6 +460,7 @@ impl Tab {
             Tab::Weather => G_WEATHER,
             Tab::Shelf => G_SHELF,
             Tab::Dex => G_DEX,
+            Tab::Battle => G_SWORDS,
             Tab::Home => G_HOME,
             Tab::Controls => G_CONTROLS,
             Tab::Power => G_ACCOUNT,
@@ -470,6 +476,7 @@ impl Tab {
             Tab::Weather => "Weather",
             Tab::Shelf => "Shelf",
             Tab::Dex => "Pokédex",
+            Tab::Battle => "Battle",
             Tab::Home => "Home",
             Tab::Controls => "Controls",
             Tab::Power => "Power",
@@ -726,6 +733,16 @@ struct App {
     /// The Pokédex tab's Legends view, and the region it shows (by `REGIONS`).
     dex_legends: bool,
     legend_page: usize,
+    /// The Battle tab: a battle going on, its sprites, the team slot being changed (and the
+    /// picker's page), the league region shown, and the ball thrown last in battle.
+    battle: Option<battle_ui::BattleView>,
+    battle_strips: HashMap<String, Option<Sprite>>,
+    team_pick: Option<usize>,
+    pick_page: usize,
+    league_region: usize,
+    battle_ball: u8,
+    /// The Battle tab shows (and edits) the League party.
+    league_party: bool,
     /// Hearts floating up from the Pokémon (x, y, born), and "+XP" pops (amount, when).
     hearts: Vec<(f32, f32, Instant)>,
     /// An egg is hatching (since when).
@@ -1307,9 +1324,13 @@ impl App {
     /// pixel when it's big enough (crisp), otherwise shrunk smoothly to its exact on-screen size.
     /// Either way drawing a frame is then a plain pixel copy, which keeps the animation cheap.
     fn load_sprite(&self, name: &str, box_h: f32) -> Option<Sprite> {
+        self.load_sprite_sized(name, box_h, MON_MAX_W)
+    }
+
+    fn load_sprite_sized(&self, name: &str, box_h: f32, max_w: f32) -> Option<Sprite> {
         let s = pokemon::strip_named(name)?;
         let (w, h) = (s.w as f32, s.h as f32);
-        let dev = (box_h / h).min(MON_MAX_W / w) * self.scale;
+        let dev = (box_h / h).min(max_w / w) * self.scale;
         let frames = s.delays.len();
         let (art, fw, fh, k) = if dev >= 1.0 {
             (s.art, s.w, s.h, dev.floor())
@@ -1842,6 +1863,13 @@ impl App {
                 60.0 + 10.0 + 34.0 + 32.0 + 26.0 + DEX_ROWS as f32 * DEX_CELL + more
             }
             Tab::Power => 34.0 + 10.0 + 62.0,
+            Tab::Battle => {
+                if self.battle.is_some() {
+                    battle_ui::FIGHT_H
+                } else {
+                    battle_ui::BATTLE_H
+                }
+            }
             Tab::Game => {
                 let rows = self.games.len().clamp(1, GAME_ROWS) as f32;
                 let playing = if self.game_child.is_some() { 52.0 } else { 0.0 };
@@ -1867,6 +1895,9 @@ impl App {
         self.ctl_dnd = controls::dnd();
         if self.tab == Tab::Media && self.media.is_none() && !self.usage.is_empty() {
             self.tab = Tab::Usage;
+        }
+        if self.battle.is_some() {
+            self.tab = Tab::Battle;
         }
         self.enter_tab();
     }
@@ -2343,6 +2374,7 @@ impl App {
             Mode::Expanded => match self.tab {
                 _ if self.tide() && self.cfg.animate_equalizer => true,
                 Tab::Media => self.playing && self.timeline.is_some(),
+                Tab::Battle => self.battle.is_some(),
                 _ => false,
             },
             Mode::Card => self.card.as_ref().is_some_and(|c| c.sticky || matches!(c.kind, CardKind::Song | CardKind::Power { .. } | CardKind::Break)),
@@ -4284,15 +4316,18 @@ impl App {
             self.quick_card("battle", G_SHIELD, tint, "Raid", &format!("{foe} is too strong right now"), &format!("Your team needs a rest after that battle: try again in {mins} min"), 4.0);
             return;
         }
-        let me = crate::quest::types_of(&self.mascot_sprite(PipMood::Calm));
-        let level = self.dex.level();
-        let Some(w) = self.wild.as_mut() else { return };
-        let them = crate::quest::types_of(w.name);
-        let p = if w.raid { crate::quest::raid_win_chance(&me, &them, level) } else { crate::quest::win_chance(&me, &them, level) };
-        let win = rand01() < p;
-        util::log(&format!("battle with {}: {} ({:.0}% chance)", w.name, if win { "won" } else { "lost" }, p * 100.0));
-        w.fight = Some((Instant::now(), win));
-        self.dirty = true;
+        if util::demo() {
+            // The demo plays the quick battle on the pill.
+            let me = crate::quest::types_of(&self.mascot_sprite(PipMood::Calm));
+            let level = self.dex.level();
+            let Some(w) = self.wild.as_mut() else { return };
+            let them = crate::quest::types_of(w.name);
+            let p = if w.raid { crate::quest::raid_win_chance(&me, &them, level) } else { crate::quest::win_chance(&me, &them, level) };
+            w.fight = Some((Instant::now(), rand01() < p));
+            self.dirty = true;
+            return;
+        }
+        self.start_wild_battle();
     }
 
     /// The battle's over: a win leaves it tired and easier to catch, a loss and it runs.
@@ -4701,6 +4736,18 @@ impl App {
         self.r.rect(R::new(x - 0.6, y - size, x + 0.6, y + size), c);
     }
 
+    /// Where a battle word goes over a Pokémon (`o`) in the pill `p`: centred above it, but
+    /// moved in so the whole line stays inside the island (the window is clipped to it, and
+    /// your Pokémon sits at the very end).
+    fn label_over(&mut self, p: R, o: R, msg: &str, size: f32, weight: u32) -> R {
+        let half = self.text_width_at(msg, size, weight) / 2.0 + 3.0;
+        let rad = self.rad.v.min(p.h() / 2.0).max(0.0);
+        let inset = if self.cfg.attach_to_top { 6.0 } else { rad * 0.7 };
+        let (lo, hi) = (p.x0 + inset + half, p.x1 - inset - half);
+        let cx = if lo < hi { o.cx().clamp(lo, hi) } else { p.cx() };
+        R::new(cx - half, (o.y0 - 14.0).max(p.y0 - 6.0), cx + half, o.y0 + 2.0)
+    }
+
     /// A wild Pokémon walking across the pill, or being caught.
     fn draw_wild(&mut self, p: R, t: f32) {
         let Some(w) = self.wild.as_ref() else {
@@ -4786,8 +4833,8 @@ impl App {
                 self.r.sprite_flip(&bmp, dest.offset(shake, 0.0), src, true, flip, alpha);
             }
             if phase >= 3 {
-                let r = R::new(dest.cx() - 60.0, (dest.y0 - 14.0).max(p.y0 - 6.0), dest.cx() + 60.0, dest.y0 + 2.0);
                 let (msg, col) = if win { ("You won!", Rgba::rgb(255, 225, 110)) } else { ("It won…", Rgba::rgb(255, 120, 100)) };
+                let r = self.label_over(p, dest, msg, 10.5, 800);
                 self.r.text(msg, r, 10.5, 800, col, Align::Center);
             } else {
                 // Over whoever is being hit, like the games: "Super effective!" and friends
@@ -4804,7 +4851,7 @@ impl App {
                 };
                 match (words, over) {
                     (Some((msg, col)), Some(o)) => {
-                        let r = R::new(o.cx() - 70.0, (o.y0 - 14.0).max(p.y0 - 6.0), o.cx() + 70.0, o.y0 + 2.0);
+                        let r = self.label_over(p, o, msg, 9.5, 800);
                         self.r.text(msg, r, 9.5, 800, col, Align::Center);
                     }
                     _ if k < 0.5 => {
@@ -5084,6 +5131,8 @@ impl App {
         let bag = self.dex.bag.clone();
         let gap = 8.0;
         let cw = (x1 - x0 - 3.0 * gap) / 4.0;
+        // Days with all three challenges done, towards the next Master Ball.
+        let towards = self.dex.full_days % crate::quest::MASTER_EVERY;
         for b in 0..4u8 {
             let r = R::xywh(x0 + b as f32 * (cw + gap), y, cw, 44.0);
             let count = bag.count(b);
@@ -5097,6 +5146,7 @@ impl App {
             self.r.text(crate::quest::BALL_NAMES[b as usize], R::new(r.x0 + 32.0, r.y0 + 5.0, r.x1 - 4.0, r.y0 + 23.0), 11.5, 600, fg, Align::Left);
             let left = match count {
                 None => "Never runs out".to_string(),
+                Some(n) if b == 3 => format!("×{n} · {towards}/{} days", crate::quest::MASTER_EVERY),
                 Some(n) => format!("×{n}"),
             };
             self.r.text(&left, R::new(r.x0 + 32.0, r.y0 + 22.0, r.x1 - 4.0, r.y1 - 4.0), 10.5, 500, sub, Align::Left);
@@ -5108,8 +5158,11 @@ impl App {
 
         let daily = self.dex.daily.clone();
         self.r.text("Today's challenges", R::new(x0 + 4.0, y, x1, y + 20.0), 11.5, 600, th.subtext, Align::Left);
-        let towards = self.dex.full_days % crate::quest::MASTER_EVERY;
-        let right = if daily.bonus { "All done today!".to_string() } else { format!("All three: +{} XP · {towards}/{} to a Master Ball", crate::quest::DAILY_BONUS_XP, crate::quest::MASTER_EVERY) };
+        let right = if daily.bonus && towards == 0 {
+            "All done today! · Master Ball earned".to_string()
+        } else if daily.bonus {
+            format!("All done today! · {towards}/{} to a Master Ball", crate::quest::MASTER_EVERY)
+        } else { format!("All three: +{} XP · {towards}/{} to a Master Ball", crate::quest::DAILY_BONUS_XP, crate::quest::MASTER_EVERY) };
         self.r.text(&right, R::new(x0, y, x1 - 4.0, y + 20.0), 10.5, 500, if daily.bonus { th.good } else { th.subtext }, Align::Right);
         y += 22.0;
         for c in &daily.list {
@@ -6602,6 +6655,7 @@ impl App {
                                 self.dex.save();
                             }
                         }
+                        Btn::Bt(b) => self.bt_click(b),
                         Btn::DexPage(d) if self.dex_legends => {
                             let pages = pokemon::legends_by_region().len() as i32;
                             self.legend_page = (self.legend_page as i32 + d).rem_euclid(pages) as usize;
@@ -7040,6 +7094,8 @@ impl App {
 
     /// One scene of the tour, then the timer for the next.
     fn demo_step(&mut self) {
+        // The battle animations the demo shows off.
+        const GALLERY: [&str; 3] = ["Dragon Claw", "Thunderbolt", "Flamethrower"];
         use crate::events::send;
         let i = DEMO_STEP.fetch_add(1, Ordering::SeqCst);
         let (name, ms): (&str, u32) = match i {
@@ -7158,37 +7214,63 @@ impl App {
                 ("tab-legends", 5000)
             }
             24 => {
+                self.demo_open(Tab::Battle, 0);
+                ("tab-battle", 5000)
+            }
+            25 => {
+                self.bt_click(battle_ui::BtBtn::Slot(1));
+                ("team-pick", 4000)
+            }
+            26 => {
+                self.team_pick = None;
+                self.start_traveller(0);
+                ("battle-start", 3500)
+            }
+            27 => {
+                self.demo_moves(&GALLERY);
+                ("battle-fx", (GALLERY.len() as f32 * battle_fx::MOVE_SECS * 1000.0) as u32 + 300)
+            }
+            28 => {
+                self.bt_click(battle_ui::BtBtn::Move(0));
+                ("battle-move", 6000)
+            }
+            29 => {
+                self.demo_finish_battle();
+                ("battle-end", 5000)
+            }
+            30 => {
+                self.battle = None;
                 self.demo_open(Tab::Game, 0);
                 ("tab-games", 4000)
             }
-            25 => {
+            31 => {
                 self.demo_open(Tab::Home, 0);
                 ("tab-home", 4500)
             }
-            26 => {
+            32 => {
                 self.demo_open(Tab::Controls, 0);
                 ("tab-controls", 4500)
             }
-            27 => {
+            33 => {
                 self.demo_open(Tab::Power, 0);
                 ("tab-power", 4000)
             }
-            28 => {
+            34 => {
                 self.expanded = false;
                 send(Event::Playback(false));
                 ("collapse", 3000)
             }
-            29 => {
+            35 => {
                 self.card = None;
                 self.queue.clear();
                 self.spawn_wild();
                 ("wild", 9000)
             }
-            30 => {
+            36 => {
                 self.throw_ball();
                 ("catch", 7000)
             }
-            31 => {
+            37 => {
                 self.card = None;
                 self.queue.clear();
                 if self.wild.is_some() {
@@ -7201,17 +7283,17 @@ impl App {
                 }
                 ("fishing", 4400)
             }
-            32 => {
+            38 => {
                 if self.fishing.as_ref().is_some_and(|f| f.bite.is_some()) {
                     self.reel_in();
                 }
                 ("reel", 3500)
             }
-            33 => {
+            39 => {
                 self.throw_ball();
                 ("catch-fish", 7000)
             }
-            34 => {
+            40 => {
                 self.card = None;
                 self.queue.clear();
                 self.wild = None;
@@ -7220,11 +7302,11 @@ impl App {
                 self.dex.egg = Some(crate::dex::Egg { species: "togepi".into(), shiny: false, minutes: 1, need: 1 });
                 ("egg", 2500)
             }
-            35 => {
+            41 => {
                 self.egg_minute();
                 ("hatch", 7000)
             }
-            36 => {
+            42 => {
                 self.card = None;
                 self.queue.clear();
                 send(Event::Weather(crate::demo::weather(true)));
@@ -8275,6 +8357,7 @@ impl App {
             Tab::Weather => self.draw_weather_tab(x0, x1, y),
             Tab::Shelf => self.draw_shelf_tab(x0, x1, y),
             Tab::Dex => self.draw_dex_tab(x0, x1, y),
+            Tab::Battle => self.draw_battle_tab(x0, x1, y),
             Tab::Home => self.draw_home_tab(x0, x1, y),
             Tab::Controls => self.draw_controls_tab(x0, x1, y),
             Tab::Power => self.draw_power_tab(x0, x1, y),
@@ -9855,6 +9938,13 @@ pub fn run() -> Result<()> {
             dex_quests: false,
             dex_legends: false,
             legend_page: 0,
+            battle: None,
+            battle_strips: HashMap::new(),
+            team_pick: None,
+            pick_page: 0,
+            league_region: 0,
+            battle_ball: 0,
+            league_party: false,
             hearts: Vec::new(),
             hatch: None,
             meeting: None,

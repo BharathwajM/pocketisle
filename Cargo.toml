@@ -1,6 +1,6 @@
 [package]
 name = "pocketisle"
-version = "0.2.6"
+version = "0.2.7"
 edition = "2021"
 description = "A native dynamic island for Windows that blends into YASB"
 license = "MIT"
