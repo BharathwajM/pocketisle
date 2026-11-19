@@ -35,9 +35,9 @@ time and the temperature. **The real weather plays across it**: rain slants and 
 its lip, storms flash, the sun's rays turn slowly, clear nights get stars and tonight's moon
 phase, and fog, snow, hail, wind, heat and frost each have a look of their own.
 
-The surface is tinted by what's going on (the album art's colour while music plays, the
-accent when something needs you). While music plays, a "tide" runs along the bottom edge in
-time with the beat. Hover to open it, double-click to play or pause, middle-click to mute,
+The surface is tinted by what's going on (the accent when something needs you). While music
+plays it keeps its dark colour and an "aurora" in the album art's colours lights the bottom
+edge in time with the music. Hover to open it, double-click to play or pause, middle-click to mute,
 scroll to change the volume, and swipe sideways to skip a song.
 
 ## Peeks and pop-ups
@@ -394,8 +394,11 @@ Right-click the island → *Reload YASB theme & settings* after changing your th
   accent for questions, approvals and Claude waiting, the artwork's colour while music
   plays, a muted accent while an agent works. Colours fade into each other rather than
   switching.
-- **Tide.** While music plays, two thin waves run along the island's lower lip, rising and
-  falling with the actual output level (the equaliser follows it too).
+- **Aurora.** While music plays, the album art's colour and a partner colour (its hue
+  turned a little: orange with pink, blue with cyan) light the island's lower lip: soft
+  lights drift to and fro and a thin spectrum rises and falls with the actual output level,
+  a swell travelling across it. The progress bar runs through the same two colours to a
+  glowing head, and a halo glows behind the album art (the equaliser follows them too).
 - **Touch.** Hovering swells the pill slightly and lights the surface under the cursor;
   clicking sends a ripple out from where you clicked.
 - **Pip.** A tiny pixel palm island in the pill that reacts: fronds sway (more with music),
@@ -749,7 +752,7 @@ Right-click the island → *Reload YASB theme & settings* after changing your th
 The island briefly peeks out (and slips back after a few seconds) for:
 
 - **A new song:** the album art with its colour glowing behind it, the title and artist,
-  the tide and a live equaliser. Click it to open the Music tab. `song_peek`
+  the aurora and a live equaliser. Click it to open the Music tab. `song_peek`
 - **Copying:** text shows its first line and length; a copied picture shows a thumbnail and
   its size. Anything a password manager marks as private is never shown. `copy_peek`
 - **Screenshots:** a new picture in the Screenshots folder (Win+PrtScn, the Snipping Tool)

@@ -49,9 +49,9 @@ const CLASS: PCWSTR = w!("PocketIsle");
 /// The copies of the island on the other screens.
 const MIRROR_CLASS: PCWSTR = w!("PocketIsleMirror");
 /// The window is a fixed transparent canvas; only the pill inside it is visible / clickable.
-const WIN_W: f32 = 560.0;
+const WIN_W: f32 = 600.0;
 /// Width of the opened island.
-const EXP_W: f32 = 540.0;
+const EXP_W: f32 = 580.0;
 const WIN_H: f32 = 640.0;
 
 /// commctrl.h's WM_MOUSELEAVE (not exported by the modules imported here).
@@ -741,6 +741,8 @@ struct App {
     pick_page: usize,
     league_region: usize,
     battle_ball: u8,
+    /// How the last wild or raid battle went, for its card.
+    battle_report: Option<battle_ui::WildReport>,
     /// The Battle tab shows (and edits) the League party.
     league_party: bool,
     /// Hearts floating up from the Pokémon (x, y, born), and "+XP" pops (amount, when).
@@ -1962,8 +1964,8 @@ impl App {
         }
     }
 
-    /// The colour the surface leans towards: album art while music plays, the accent when
-    /// something needs you, a card's own colour, else a quiet blend.
+    /// The colour the surface leans towards: the accent when something needs you, a card's
+    /// own colour, else a quiet blend (music brings its colours in as light instead).
     fn mood_target(&self) -> Rgba {
         let th = &self.theme;
         match self.mode {
@@ -1971,7 +1973,6 @@ impl App {
             Mode::Card => self.card.as_ref().map(|c| c.tint).unwrap_or(th.accent),
             Mode::Compact | Mode::Expanded => match self.compact() {
                 Compact::Waiting(_) => th.accent,
-                Compact::Media if self.playing => self.tint.unwrap_or(th.accent),
                 Compact::Working(_) => th.accent.mix(th.bg2, 0.35),
                 _ => th.bg2.mix(th.accent, 0.3),
             },
@@ -4343,8 +4344,11 @@ impl App {
         let (mine, my_x) = crate::quest::best_attack(&me, &them);
         let (theirs, their_x) = crate::quest::best_attack(&them, &me);
         let (who, foe) = (pokemon::pretty(&me_sprite), pokemon::pretty(name));
+        // A real battle (your team) says how it went; the demo's quick battle on the pill is
+        // your buddy's alone.
+        let report = self.battle_report.take();
         if w.raid {
-            self.finish_raid_battle(win, (mine, my_x), (theirs, their_x), &who, &foe, &me_sprite, &sprite);
+            self.finish_raid_battle(win, (mine, my_x), (theirs, their_x), &who, &foe, &me_sprite, &sprite, report);
             return;
         }
         if win {
@@ -4360,18 +4364,29 @@ impl App {
                 self.dex.bag.add(1, 1);
             }
             self.dex.save();
-            let xp = 40 + if my_x >= 2.0 { 10 } else { 0 };
-            let found = if ball { " · found a Great Ball" } else { "" };
-            let body = format!("{} on {}: {} · +{xp} XP{found} · {foe} is tired: easier to catch", pokemon::TYPES[mine].0, type_names(&them), crate::quest::effect_words(my_x));
+            let (title, body, icon, xp) = match &report {
+                Some(r) => {
+                    // A bonus when no one fainted.
+                    let xp = 40 + if r.fainted == 0 { 10 } else { 0 };
+                    let found = if ball { " · a Great Ball" } else { "" };
+                    (format!("You beat the wild {foe}!"), format!("{} · +{xp} XP{found} · it's tired: easier to catch", r.won_line()), r.star.clone(), xp)
+                }
+                None => {
+                    let xp = 40 + if my_x >= 2.0 { 10 } else { 0 };
+                    let found = if ball { " · found a Great Ball" } else { "" };
+                    let body = format!("{} on {}: {} · +{xp} XP{found} · {foe} is tired: easier to catch", pokemon::TYPES[mine].0, type_names(&them), crate::quest::effect_words(my_x));
+                    (format!("{who} won the battle!"), body, me_sprite.clone(), xp)
+                }
+            };
             let ttl = self.card_ttl(6.0);
             self.push_card(Card {
                 key: Some("battle".into()),
                 glyph: G_SWORDS,
                 tint: self.theme.good,
                 app: "Battle".into(),
-                title: format!("{who} won the battle!"),
+                title,
                 body,
-                icon: pokemon::first_frame(&me_sprite),
+                icon: pokemon::first_frame(&icon),
                 sticky: false,
                 ttl,
                 focus: Focus::No,
@@ -4385,7 +4400,10 @@ impl App {
             self.dex.visitor = None;
             self.dex.battles_lost += 1;
             self.dex.save();
-            let body = format!("Its {} on your {}: {} · +10 XP for trying", pokemon::TYPES[theirs].0, type_names(&me), crate::quest::effect_words(their_x));
+            let body = match &report {
+                Some(r) => format!("{} · +10 XP for trying", r.lost_line()),
+                None => format!("Its {} on your {}: {} · +10 XP for trying", pokemon::TYPES[theirs].0, type_names(&me), crate::quest::effect_words(their_x)),
+            };
             let ttl = self.card_ttl(5.0);
             self.push_card(Card {
                 key: Some("battle".into()),
@@ -4407,8 +4425,9 @@ impl App {
 
     /// A battle with the raid boss: a win breaks a shield, a loss means a rest before the next.
     #[allow(clippy::too_many_arguments)]
-    fn finish_raid_battle(&mut self, win: bool, (mine, my_x): (usize, f32), (theirs, their_x): (usize, f32), who: &str, foe: &str, me_sprite: &str, boss_sprite: &str) {
+    fn finish_raid_battle(&mut self, win: bool, (mine, my_x): (usize, f32), (theirs, their_x): (usize, f32), who: &str, foe: &str, me_sprite: &str, boss_sprite: &str, report: Option<battle_ui::WildReport>) {
         let now = crate::dex::now_unix();
+        let me_sprite = report.as_ref().map_or(me_sprite, |r| r.star.as_str());
         let (title, body, tint, icon, xp) = if win {
             self.dex.battles_won += 1;
             let left = match self.dex.raid.as_mut() {
@@ -4428,14 +4447,14 @@ impl App {
                     v.tired = true;
                 }
             }
-            let xp = 60 + if my_x >= 2.0 { 10 } else { 0 };
+            let xp = 60 + if report.as_ref().map_or(my_x >= 2.0, |r| r.fainted == 0) { 10 } else { 0 };
+            let shields = format!("{left} shield{} left", if left == 1 { "" } else { "s" });
             let (title, body) = if left == 0 {
                 (format!("{foe}'s last shield broke!"), format!("Catch it now: {} balls before it gets away · +{xp} XP", crate::quest::RAID_THROWS))
+            } else if let Some(r) = &report {
+                ("You broke a shield!".to_string(), format!("{} · {shields} · +{xp} XP", r.won_line()))
             } else {
-                (
-                    format!("{who} broke a shield!"),
-                    format!("{} attack: {} · {left} shield{} left · +{xp} XP", pokemon::TYPES[mine].0, crate::quest::effect_words(my_x), if left == 1 { "" } else { "s" }),
-                )
+                (format!("{who} broke a shield!"), format!("{} attack: {} · {shields} · +{xp} XP", pokemon::TYPES[mine].0, crate::quest::effect_words(my_x)))
             };
             (title, body, self.theme.good, me_sprite, xp)
         } else {
@@ -4443,12 +4462,11 @@ impl App {
             if let Some(r) = self.dex.raid.as_mut() {
                 r.rest_until = now + crate::quest::RAID_REST_SECS;
             }
-            let body = format!(
-                "Its {} attack was {} · rest {} min, then battle again · +10 XP",
-                pokemon::TYPES[theirs].0,
-                crate::quest::effect_words(their_x),
-                crate::quest::RAID_REST_SECS / 60
-            );
+            let rest = crate::quest::RAID_REST_SECS / 60;
+            let body = match &report {
+                Some(r) => format!("{} · rest {rest} min, then battle again · +10 XP", r.lost_line()),
+                None => format!("Its {} attack was {} · rest {rest} min, then battle again · +10 XP", pokemon::TYPES[theirs].0, crate::quest::effect_words(their_x)),
+            };
             (format!("{foe} held its ground"), body, self.theme.bad, boss_sprite, 10)
         };
         self.dex.save();
@@ -7773,18 +7791,9 @@ impl App {
                 self.draw_weather(body, t, wx, a);
             }
         }
-        // The tide: two waves along the lip, moving with the music's loudness.
+        // The aurora: while music plays, the album's colours light up the lip.
         if self.tide() {
-            let tint = self.tint.unwrap_or(th.accent).mix(Rgba::rgb(255, 255, 255), 0.15);
-            let lvl = self.peak.v;
-            let still = if self.cfg.animate_equalizer { 1.0 } else { 0.0 };
-            let (wx0, wx1, wy) = (body.x0 + rad * 0.8, body.x1 - rad * 0.8, body.y1 - 3.2);
-            self.r.wave(wx0, wx1, wy, 0.6 + 3.0 * lvl, 41.0, t * 2.3 * still, tint.a(0.5 + 0.3 * lvl), 1.4);
-            self.r.wave(wx0, wx1, wy + 0.6, 0.5 + 2.0 * lvl, 26.0, 1.3 - t * 1.6 * still, tint.a(0.25 + 0.2 * lvl), 1.1);
-            // Each beat swells a glow up from the lip.
-            if self.beat > 0.0 {
-                self.r.glow(cx, body.y1, 70.0 + 50.0 * self.beat, tint.a(0.2 * self.beat));
-            }
+            self.draw_aurora(body, rad, t);
         }
         if a > 0.01 {
             // Fading content needs its own layer; fully shown, the shape mask already clips it.
@@ -7825,9 +7834,62 @@ impl App {
         self.r.pop();
 
         // The rim: invisible at the screen's edge, catching the light along the lip.
-        let rim = th.border.mix(mood, 0.5 + 0.35 * pulse).mix(light, 0.6 * self.beat);
+        let rim = if self.tide() {
+            let (c1, c2) = self.music_colours();
+            th.border.mix(c1.mix(c2, 0.5), 0.5).mix(light, 0.5 * self.beat)
+        } else {
+            th.border.mix(mood, 0.5 + 0.35 * pulse).mix(light, 0.6 * self.beat)
+        };
         let rim_top = if self.cfg.attach_to_top { rim.a(0.0) } else { rim.a(0.55) };
         self.r.stroke_vertical(&shape, body.y0, body.y1, rim_top, rim.a(0.9), 1.0);
+    }
+
+    /// The album's colour and a second one to go with it.
+    fn music_colours(&self) -> (Rgba, Rgba) {
+        let c1 = self.tint.unwrap_or(self.theme.accent);
+        (c1, companion(c1))
+    }
+
+    /// Soft lights drifting along the lip and a thin spectrum rising from it, in the
+    /// album's colours, moving with the music's loudness (still when animation is off).
+    fn draw_aurora(&mut self, body: R, rad: f32, t: f32) {
+        use std::f32::consts::{PI, TAU};
+        let (c1, c2) = self.music_colours();
+        let lvl = self.peak.v.clamp(0.0, 1.0);
+        let go = if self.cfg.animate_equalizer { 1.0 } else { 0.0 };
+        let t = t * go;
+        let tall = body.h() > 60.0;
+        let (x0, x1, y1) = (body.x0 + rad * 0.55, body.x1 - rad * 0.55, body.y1);
+        let span = (x1 - x0).max(1.0);
+        // Lights drifting to and fro, in the two colours.
+        let n = if tall { 5 } else { 3 };
+        let size = if tall { 95.0 } else { 34.0 };
+        for i in 0..n {
+            let home = (i as f32 + 0.5) / n as f32;
+            let sway = 0.6 / n as f32 * (t * (0.21 + 0.07 * i as f32) + i as f32 * 2.1).sin();
+            let x = x0 + span * (home + sway);
+            let breathe = 0.5 + 0.5 * (t * (0.9 + 0.23 * i as f32) + i as f32).sin();
+            let c = if i % 2 == 0 { c1 } else { c2 };
+            let a = 0.10 + 0.12 * breathe + 0.22 * lvl + 0.2 * self.beat;
+            self.r.glow(x, y1 + size * 0.2, size * (0.85 + 0.3 * lvl + 0.2 * self.beat), c.a(a.min(0.6)));
+        }
+        // The spectrum: thin bars, tallest in the middle, a swell travelling across.
+        let (bw, gap) = if tall { (3.4, 3.6) } else { (2.6, 2.8) };
+        let count = ((span / (bw + gap)) as usize).max(2);
+        let max_h = if tall { 18.0 } else { 8.0 };
+        let left = x0 + (span - (count as f32 * (bw + gap) - gap)) / 2.0;
+        for k in 0..count {
+            let u = k as f32 / (count - 1) as f32;
+            let x = left + k as f32 * (bw + gap);
+            let flicker = 0.5 + 0.5 * (t * (2.3 + (k % 7) as f32 * 0.41) + k as f32 * 1.37).sin();
+            let swell = 0.5 + 0.5 * (t * 1.6 - u * TAU * 1.5).sin();
+            let shape = (u * PI).sin().powf(0.7);
+            let h = 2.0 + max_h * shape * (0.45 + 0.55 * lvl) * (0.3 * flicker + 0.7 * swell);
+            let c = c1.mix(c2, u);
+            self.r.fill_round(R::new(x, y1 - h - 1.0, x + bw, y1 + bw), bw / 2.0, c.a(0.38 + 0.4 * lvl));
+            // A bright tip.
+            self.r.fill_round(R::new(x, y1 - h - 1.0, x + bw, y1 - h - 1.0 + bw), bw / 2.0, c.mix(Rgba::rgb(255, 255, 255), 0.45).a(0.35 + 0.45 * lvl));
+        }
     }
 
     /// The target size without re-measuring text (used for the fade-in amount).
@@ -7915,7 +7977,8 @@ impl App {
                     };
                     let hgt = 3.0 + 9.0 * amp;
                     let x = ex + i as f32 * 4.5;
-                    self.r.fill_round(R::new(x, cy - hgt / 2.0, x + 2.6, cy + hgt / 2.0), 1.3, tint);
+                    let (c1, c2) = self.music_colours();
+                    self.r.fill_round(R::new(x, cy - hgt / 2.0, x + 2.6, cy + hgt / 2.0), 1.3, c1.mix(c2, i as f32 / 2.0));
                 }
                 if spin > 0.0 {
                     self.spinner(p.x1 - 20.0, cy, t, th.accent);
@@ -9299,7 +9362,13 @@ impl App {
             return self.empty_row(G_MUSIC, "Nothing playing", x0, x1, y);
         };
         let tint = self.tint.unwrap_or(th.accent);
+        let (c1, c2) = self.music_colours();
         let art = R::xywh(x0, y, 56.0, 56.0);
+        if self.playing {
+            let breathe = if self.cfg.animate_equalizer { 0.5 + 0.5 * (self.t0.elapsed().as_secs_f32() * 1.4).sin() } else { 0.5 };
+            self.r.glow(art.cx(), art.cy() + 4.0, 66.0 + 8.0 * self.beat, c1.a(0.45 + 0.12 * breathe + 0.15 * self.beat));
+            self.r.glow(art.cx() + 18.0, art.cy() + 12.0, 48.0, c2.a(0.3 + 0.1 * breathe));
+        }
         match &self.art_bmp {
             Some(b) => self.r.image(b, art, 12.0, 1.0),
             None => {
@@ -9333,7 +9402,22 @@ impl App {
             let frac = (cur / end).clamp(0.0, 1.0) as f32;
             let bar = R::new(x0, y, x1, y + 4.0);
             self.r.fill_round(bar, 2.0, th.bg2);
-            self.r.fill_round(R::new(x0, y, x0 + (bar.w() * frac).max(4.0), y + 4.0), 2.0, tint);
+            // From the album's colour into its partner, with a glowing head.
+            let end = x0 + (bar.w() * frac).max(4.0);
+            self.r.fill_round(R::new(x0, y, end, y + 4.0), 2.0, c1);
+            let step = 5.0;
+            let mut sx = x0 + 2.0;
+            while sx < end - 2.0 {
+                let ex = (sx + step + 0.6).min(end - 2.0);
+                self.r.rect(R::new(sx, y, ex, y + 4.0), c1.mix(c2, ((sx - x0) / bar.w()).clamp(0.0, 1.0)));
+                sx += step;
+            }
+            let head = c1.mix(c2, frac);
+            self.r.fill_round(R::new(end - 4.0, y, end, y + 4.0), 2.0, head);
+            if self.playing {
+                self.r.glow(end - 2.0, y + 2.0, 14.0 + 6.0 * self.beat, head.a(0.55));
+            }
+            self.r.circle(end - 2.0, y + 2.0, 4.0, head.mix(Rgba::rgb(255, 255, 255), 0.55));
         }
     }
 
@@ -9946,6 +10030,7 @@ pub fn run() -> Result<()> {
             pick_page: 0,
             league_region: 0,
             battle_ball: 0,
+            battle_report: None,
             league_party: false,
             hearts: Vec::new(),
             hatch: None,
@@ -10138,4 +10223,38 @@ pub fn run() -> Result<()> {
         util::log("stopped");
         Ok(())
     }
+}
+
+/// A colour to go with `c`: its hue turned a little (about 40°, orange towards pink, blue
+/// towards cyan) and a touch brighter, so
+/// the two read as one palette. Greys get a lighter grey.
+fn companion(c: Rgba) -> Rgba {
+    let (r, g, b) = (c.r, c.g, c.b);
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let d = max - min;
+    if d < 0.06 {
+        return c.mix(Rgba::rgb(255, 255, 255), 0.4);
+    }
+    let h = if max == r {
+        ((g - b) / d).rem_euclid(6.0)
+    } else if max == g {
+        (b - r) / d + 2.0
+    } else {
+        (r - g) / d + 4.0
+    };
+    let h = (h - 0.7).rem_euclid(6.0);
+    let s = (d / max).clamp(0.4, 0.85);
+    let v = (max * 1.12 + 0.1).min(1.0);
+    let f = h - h.floor();
+    let (p, q, u) = (v * (1.0 - s), v * (1.0 - s * f), v * (1.0 - s * (1.0 - f)));
+    let (r, g, b) = match h as u32 {
+        0 => (v, u, p),
+        1 => (q, v, p),
+        2 => (p, v, u),
+        3 => (p, q, v),
+        4 => (u, p, v),
+        _ => (v, p, q),
+    };
+    Rgba { r, g, b, a: c.a }
 }

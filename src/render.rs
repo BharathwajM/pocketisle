@@ -696,36 +696,6 @@ impl Renderer {
         }
     }
 
-    /// A travelling wave from `x0` to `x1` around `y`: `amp` high, `len` long, shifted by
-    /// `phase` (radians), tapering to flat at both ends.
-    #[allow(clippy::too_many_arguments)]
-    pub fn wave(&mut self, x0: f32, x1: f32, y: f32, amp: f32, len: f32, phase: f32, c: Rgba, w: f32) {
-        if x1 - x0 < 4.0 {
-            return;
-        }
-        let n = ((x1 - x0) / 3.0).ceil().max(2.0) as usize;
-        let pts: Vec<Vector2> = (0..=n)
-            .map(|i| {
-                let u = i as f32 / n as f32;
-                let x = x0 + (x1 - x0) * u;
-                let taper = (u * std::f32::consts::PI).sin();
-                Vector2 { X: x, Y: y + amp * taper * (x / len * std::f32::consts::TAU + phase).sin() }
-            })
-            .collect();
-        self.ensure_round_caps();
-        unsafe {
-            let Ok(g) = self.factory.CreatePathGeometry() else { return };
-            let Ok(sink) = g.Open() else { return };
-            sink.BeginFigure(pts[0], D2D1_FIGURE_BEGIN_HOLLOW);
-            sink.AddLines(&pts[1..]);
-            sink.EndFigure(D2D1_FIGURE_END_OPEN);
-            if sink.Close().is_err() {
-                return;
-            }
-            self.dc.DrawGeometry(&g, self.paint(c), w, self.round_caps.as_ref());
-        }
-    }
-
     fn ensure_round_caps(&mut self) {
         if self.round_caps.is_some() {
             return;

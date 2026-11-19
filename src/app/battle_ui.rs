@@ -39,6 +39,34 @@ pub(super) enum BtBtn {
     Peek(u8),
 }
 
+/// How a battle with a wild Pokémon or raid boss went, for its card.
+pub(super) struct WildReport {
+    /// Your Pokémon that was out at the end (sprite name).
+    pub star: String,
+    pub turns: u32,
+    pub fainted: usize,
+    pub team: usize,
+}
+
+impl WildReport {
+    /// "Scizor won it in 4 turns, no one fainted".
+    pub fn won_line(&self) -> String {
+        let turns = if self.turns == 1 { "1 turn".to_string() } else { format!("{} turns", self.turns) };
+        let hurt = match self.fainted {
+            0 => ", no one fainted".to_string(),
+            1 => ", 1 of yours fainted".to_string(),
+            n => format!(", {n} of yours fainted"),
+        };
+        format!("{} won it in {turns}{hurt}", pokemon::pretty(&self.star))
+    }
+
+    /// "It beat all 6 of yours in 9 turns".
+    pub fn lost_line(&self) -> String {
+        let who = if self.team == 1 { "your Pokémon".to_string() } else { format!("all {} of yours", self.team) };
+        format!("It beat {who} in {} turns", self.turns.max(1))
+    }
+}
+
 /// Who you're battling.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub(super) enum Foe {
@@ -521,6 +549,12 @@ impl App {
                         if let Some(w) = self.wild.as_mut() {
                             w.fight = Some((Instant::now(), won));
                         }
+                        self.battle_report = Some(WildReport {
+                            star: v.b.me.cur().name.clone(),
+                            turns: v.b.turns,
+                            fainted: v.b.me.mons.iter().filter(|m| m.fainted()).count(),
+                            team: v.b.me.mons.len(),
+                        });
                         self.finish_battle();
                     }
                     Outcome::Ran => {}
