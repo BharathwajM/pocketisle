@@ -3,7 +3,7 @@
 **A dynamic island for Windows**, written in Rust. It hangs from the top edge of your screen
 (or sits in the middle of a [YASB](https://github.com/amnweb/yasb) bar) as a small pill with
 the time, the weather and a Pokémon. It grows into cards when something happens and opens
-into a full panel when you hover over it. One ~2 MB exe, ~18 MB of memory, no web view.
+into a full panel when you hover over it. One ~3 MB exe, no web view.
 
 <p align="center">
   <img src="docs/media/highlights.gif" width="544" alt="Pocket Isle: a Claude Code permission prompt, a song peek, the Music, System, Weather, Pokédex and Battle tabs, a battle, catching a wild Pokémon, fishing and an egg hatching">
@@ -72,7 +72,8 @@ at a glance:
 Rest the pointer on a panel (or click it) and it grows into a small island of its own with
 what the matching tab shows: the Usage, Calendar, Music, Pokédex or System tab, a temperature
 dashboard, or each Bluetooth device with its battery. It closes when you move away or click it
-again.
+again. The Bluetooth panel asks a device connected over Bluetooth LE (an iPhone, for one) for
+its battery directly, because Windows' own copy can be hours old.
 
 <img src="docs/media/side-bluetooth.png" width="329" alt="The Bluetooth panel opened: headphones at 80% and a phone at 64%">
 
@@ -105,15 +106,22 @@ Codex's plan limits (below).
 
 Hover over the island and it opens. The tabs along the top are styled like YASB's round
 buttons; the selected one widens to show its name, and a dot marks a tab with something
-going on.
+going on. There are twelve: **Music**, **Usage**, **Calendar**, **System**, **Weather**,
+**Shelf**, **Pokédex**, **Battle** and **Games**, then **Home**, **Controls** and **Power** at
+the right. The Pokédex and Battle tabs are under [Pokémon on the island](#pokémon-on-the-island).
+
+A tab a [side panel](#side-panels) already shows leaves the island and opens from its panel
+instead: with the default `"wings"`, that's Music, Usage (when you track Claude or Codex)
+and Calendar; with `"both"`, Pokédex and System as well. The pictures here show the island
+with `side_panels` set to `"off"`, so every tab is in the bar.
 
 | | |
 |---|---|
 | <img src="docs/media/tab-music.png" width="420" alt="Music tab"><br>**Music**: art, title, artist and app, previous / play-pause / next, and a progress bar you can scrub. | <img src="docs/media/tab-usage.png" width="420" alt="Usage tab"><br>**Usage**: Claude's and Codex's 5-hour and weekly limits, with reset countdowns. Cards warn when one gets critical. |
 | <img src="docs/media/tab-calendar.png" width="420" alt="Calendar tab"><br>**Calendar**: today's events and the next one, from YASB's calendar, with reminders. | <img src="docs/media/tab-weather.png" width="420" alt="Weather tab"><br>**Weather**: now, the next hours and the next days (Open-Meteo). |
 | <img src="docs/media/tab-system.png" width="420" alt="System tab"><br>**System**: CPU, memory, GPU and disk with live graphs, network and ping, Bluetooth batteries, and the top apps (close one from here). Click a box for a detail page. | <img src="docs/media/tab-shelf.png" width="420" alt="Shelf tab"><br>**Shelf**: drop files on the island to keep them handy, then drag them out again. Below, the last 20 things you copied; click one to copy it again. |
-| <img src="docs/media/tab-home.png" width="420" alt="Home tab"><br>**Home**: shortcuts, plus notes and to-dos you can type straight into the island. | <img src="docs/media/tab-controls.png" width="420" alt="Controls tab"><br>**Controls**: Do Not Disturb, mute, mic mute, screenshot, dark mode, brightness / volume / mic sliders, a break reminder, and the sound output. |
-| <img src="docs/media/tab-games.png" width="420" alt="Games tab"><br>**Games**: play DS, GBA and Game Boy games you own, in a window of their own (melonDS and mGBA cores). No games come with Pocket Isle. | <img src="docs/media/tab-power.png" width="420" alt="Power tab"><br>**Power**: lock, sign out, sleep, hibernate, restart and shut down, with your uptime. |
+| <img src="docs/media/tab-home.png" width="420" alt="Home tab"><br>**Home**: shortcuts, plus notes and to-dos you can type straight into the island. | <img src="docs/media/tab-controls.png" width="420" alt="Controls tab"><br>**Controls**: Do Not Disturb, mute, mic mute, screenshot, the touch keyboard, dark mode, brightness / volume / mic sliders, a break reminder, the sound output, and Wallpaper Engine's wallpaper of the day. |
+| <img src="docs/media/tab-games.png" width="420" alt="Games tab"><br>**Games**: play DS, GBA and Game Boy games you own, in a window of their own (melonDS and mGBA cores), with your last five listed. No games come with Pocket Isle. | <img src="docs/media/tab-power.png" width="420" alt="Power tab"><br>**Power**: lock, sign out, sleep, hibernate, restart and shut down, with your uptime. |
 
 ## Pokémon on the island
 
@@ -375,14 +383,17 @@ The pictures and the video above were recorded from it with ffmpeg.
   asks its windows to close so it can save first, and ends it only if it has no windows.
   Windows itself and the island are never listed. Under the network row, the battery of
   each connected Bluetooth device Windows knows one for (earbuds, mouse, keyboard,
-  controller, phone), red at 20% or less. Only measured while the tab is open. Windows'
-  own copy of a device's battery can be hours old, so a device connected over Bluetooth LE
-  (an iPhone, for one) is asked for its battery directly, at most once a minute and again
-  when you open the Bluetooth panel; if it doesn't answer within 6 seconds, Windows' number
-  is shown.
+  controller, phone), as Windows last read it, red at 20% or less. Only measured while the
+  tab is open.
+- **Bluetooth panel.** The side panel between the next event and the PC panel lists every
+  connected Bluetooth device. Windows' own copy of a device's battery can be hours old, so a
+  device connected over Bluetooth LE (an iPhone, for one) is asked for its battery directly,
+  at most once a minute and again when you open the panel; if it doesn't answer within 6
+  seconds, Windows' number is shown.
 - **Weather.** Open-Meteo for the place set in YASB's weather widget: now, the next six
   hours and the next six days. The temperature also shows in the idle pill.
-- **Home.** Shortcut buttons (folders, Gold Tasks, Settings, Task Manager, Terminal);
+- **Home.** Shortcut buttons (Home, Downloads, Documents, Pictures, This PC, Settings, Task
+  Manager, Terminal);
   edit `shortcuts` in the settings. Below them, **Notes**: click the box and type a note or
   to-do (Enter adds it, Esc stops; Ctrl+V pastes), click one to tick it, × to remove it,
   **Clear ticked** to tidy up. Up to eight, kept in `~/.config/pocketisle/notes.json`. The
@@ -398,8 +409,9 @@ The pictures and the video above were recorded from it with ffmpeg.
   three ask for a second click), with your name and uptime.
 
 Hover or click the island to open it. Along the top are tabs styled like YASB's round
-widget buttons: **Music**, **Usage**, **Calendar**, **System**, **Weather**,
-**Shelf**, **Pokédex**, and on the right **Home**, **Controls** and **Power**. The selected tab widens to show its name, and a
+widget buttons: **Music**, **Usage**, **Calendar**, **System**, **Weather**, **Shelf**,
+**Pokédex**, **Battle**, **Games**, and on the right **Home**, **Controls** and **Power**
+(tabs a side panel shows open from the panel instead). The selected tab widens to show its name, and a
 small dot marks a tab with something going on (music playing, a limit in the red). The
 island opens on the tab you last used. Claude's and Codex's questions and permission
 prompts come up on their own as cards, so there's no Agents tab.
@@ -739,7 +751,8 @@ Right-click the island → *Reload YASB theme & settings* after changing your th
   - **Games tab.** Play DS, Game Boy Advance, Game Boy and Game Boy Color games you own.
     **Open game…** picks a `.nds`, `.gba`, `.gb`, `.gbc` file (or a `.zip` with one inside,
     unpacked once into `%LOCALAPPDATA%\PocketIsle\games\unpacked`) and starts it; the tab
-    lists the last five with when you played them (**×** only takes one off the list). The
+    lists the last five with when you played them (**×** only takes one off the list), and
+  while a game runs, **Show** brings its window back and **Stop** closes it. The
     game runs in a window of its own (`pocketisle.exe play <game>`, a separate process so a crash
     can't take the island down), any size, in the game's shape. DS games use the melonDS DS
     core, the others mGBA (libretro builds in `%LOCALAPPDATA%\PocketIsle\cores`). Keys: arrows =
@@ -821,12 +834,12 @@ Each peek has a setting (named above) to turn it off.
 
 ## Performance
 
-One ~2 MB exe. Measured on a laptop (2560×1600 @ 150%):
+One ~3 MB exe. Measured on a laptop (2560×1600 @ 150%):
 
 | | Pocket Isle | Island 1.2.10 (for comparison) |
 |---|---|---|
 | Processes | 2 (the island, and a small watcher that restarts it after a crash) | 8 (WebView2) |
-| Private memory | ~18 MB | ~664 MB |
+| Private memory | ~65 MB with all six side panels and animated sprites (the watcher ~2 MB) | ~664 MB |
 | CPU, idle (no mascot) | 0 (blocks in `GetMessage`) | — |
 | CPU, idle with the animated Pokémon | ~2% of one core | — |
 | CPU, music playing (equaliser) | ~1% of one core | — |
@@ -854,7 +867,7 @@ Unlike Island, Pocket Isle stays visible in screenshots and screen recordings.
 | `show_notifications` | `true` | Windows notifications as cards |
 | `notification_ignore` | `[]` | App names never shown, e.g. `["Microsoft Teams"]` |
 | `break_minutes` | `60` | Minutes of steady use before a 20-second eye break (0 = never) |
-| `clipboard_history` | `true` | Keep the last ten copies in the Shelf tab (memory only) |
+| `clipboard_history` | `true` | Keep the last 20 copies in the Shelf tab (text saved in `clips.json`, pictures in memory only) |
 | `pokemon_cries` | `true` | The Pokémon's cry when poked, caught or evolving (never while the microphone is on) |
 | `wild_pokemon` | `true` | Wild Pokémon wander across the pill now and then |
 | `wild_minutes` | `[5, 15]` | Shortest and longest wait (minutes) between wild Pokémon; each wait is random in between |
