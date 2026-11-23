@@ -57,6 +57,9 @@ The island briefly grows into a card for things worth a glance, then slips back.
 Small panels can sit along the top of the screen beside the island, each showing one thing
 at a glance:
 
+<img src="docs/media/side-left.png" width="724" alt="Side panels left of the island: the Pokémon team with its level, the temperature, and Claude and Codex limits"><br>
+<img src="docs/media/side-right.png" width="551" alt="Side panels right of the island: the next event, Bluetooth batteries, and CPU, memory, GPU and ping">
+
 | Where | Shows |
 |---|---|
 | **Left wing** | Your Claude and Codex limits, or the song while music plays |
@@ -69,7 +72,11 @@ at a glance:
 Rest the pointer on a panel (or click it) and it grows into a small island of its own with
 what the matching tab shows: the Usage, Calendar, Music, Pokédex or System tab, a temperature
 dashboard, or each Bluetooth device with its battery. It closes when you move away or click it
-again. The panels hide while the island is open or asking you something, and the island leaves
+again.
+
+<img src="docs/media/side-bluetooth.png" width="329" alt="The Bluetooth panel opened: headphones at 80% and a phone at 64%">
+
+The panels hide while the island is open or asking you something, and the island leaves
 out the tabs they already show. Pick which ones you want with `side_panels` in the
 [settings](#settings): `"wings"` (beside the pill), `"corners"` (the far edges), `"both"` (all
 six) or `"off"`.
