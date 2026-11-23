@@ -16,6 +16,7 @@ into a full panel when you hover over it. One ~2 MB exe, ~18 MB of memory, no we
 
 - [The pill](#the-pill)
 - [Peeks and pop-ups](#peeks-and-pop-ups)
+- [Side panels](#side-panels)
 - [Claude Code and Codex](#claude-code-and-codex)
 - [The tabs](#the-tabs)
 - [Pokémon on the island](#pokémon-on-the-island)
@@ -50,6 +51,28 @@ The island briefly grows into a card for things worth a glance, then slips back.
 | <img src="docs/media/volume.png" width="300" alt="Volume pop-up"><br>**Volume and brightness** replace the Windows flyout. | <img src="docs/media/camera.png" width="400" alt="Camera on"><br>**Camera and microphone**: a green or orange dot, and which app turned it on. |
 | <img src="docs/media/github.png" width="400" alt="GitHub checks passed"><br>**GitHub**: your pull requests' checks and reviews (through the GitHub CLI). | <img src="docs/media/download.png" width="400" alt="Download finished"><br>**Downloads**: open the file, show it in its folder, or keep it on the Shelf. |
 | <img src="docs/media/headphones.png" width="400" alt="Headphones connected"><br>**Headphones** connecting, with their battery. | <img src="docs/media/brightness.png" width="300" alt="Brightness pop-up"><br>Also: copies, screenshots, the charger, Wi-Fi and VPN changes, heat, calendar reminders, eye breaks and a morning greeting. |
+
+## Side panels
+
+Small panels can sit along the top of the screen beside the island, each showing one thing
+at a glance:
+
+| Where | Shows |
+|---|---|
+| **Left wing** | Your Claude and Codex limits, or the song while music plays |
+| **Right wing** | Your next calendar event |
+| **Left corner** | Your Pokémon team (animated), your level and today's challenges |
+| **Right corner** | CPU, memory, GPU and ping |
+| **Between, left** | How hot the PC is running |
+| **Between, right** | Your Bluetooth devices and their batteries |
+
+Rest the pointer on a panel (or click it) and it grows into a small island of its own with
+what the matching tab shows: the Usage, Calendar, Music, Pokédex or System tab, a temperature
+dashboard, or each Bluetooth device with its battery. It closes when you move away or click it
+again. The panels hide while the island is open or asking you something, and the island leaves
+out the tabs they already show. Pick which ones you want with `side_panels` in the
+[settings](#settings): `"wings"` (beside the pill), `"corners"` (the far edges), `"both"` (all
+six) or `"off"`.
 
 ## Claude Code and Codex
 
@@ -246,6 +269,13 @@ The pictures and the video above were recorded from it with ffmpeg.
 
 ## Feature reference
 
+- **Side panels.** See [Side panels](#side-panels). The team shows each Pokémon at the stage
+  that fits your level, as the Battle tab does. A panel opens 250 ms after the pointer comes
+  to rest on it; it is drawn once, unseen, while you wait, so it opens without a stutter.
+- **Back after a crash.** The copy of Pocket Isle that starts with Windows only keeps watch:
+  it runs the island as a second copy of itself and starts it again two seconds after a crash
+  (not when you quit it or end it in Task Manager). After four crashes in ten minutes it
+  stops trying, and the log says why. Ending the watcher ends the island too.
 - **Volume & brightness pop-up.** Takes over the volume keys, so the Windows flyout never
   shows. Scroll on the island to change volume too.
 - **Now playing.** Album art, title, artist and source app; hover (or click) for
@@ -338,7 +368,11 @@ The pictures and the video above were recorded from it with ffmpeg.
   asks its windows to close so it can save first, and ends it only if it has no windows.
   Windows itself and the island are never listed. Under the network row, the battery of
   each connected Bluetooth device Windows knows one for (earbuds, mouse, keyboard,
-  controller), red at 20% or less. Only measured while the tab is open.
+  controller, phone), red at 20% or less. Only measured while the tab is open. Windows'
+  own copy of a device's battery can be hours old, so a device connected over Bluetooth LE
+  (an iPhone, for one) is asked for its battery directly, at most once a minute and again
+  when you open the Bluetooth panel; if it doesn't answer within 6 seconds, Windows' number
+  is shown.
 - **Weather.** Open-Meteo for the place set in YASB's weather widget: now, the next six
   hours and the next six days. The temperature also shows in the idle pill.
 - **Home.** Shortcut buttons (folders, Gold Tasks, Settings, Task Manager, Terminal);
@@ -780,11 +814,11 @@ Each peek has a setting (named above) to turn it off.
 
 ## Performance
 
-One ~2 MB exe, one process. Measured on a laptop (2560×1600 @ 150%):
+One ~2 MB exe. Measured on a laptop (2560×1600 @ 150%):
 
 | | Pocket Isle | Island 1.2.10 (for comparison) |
 |---|---|---|
-| Processes | 1 | 8 (WebView2) |
+| Processes | 2 (the island, and a small watcher that restarts it after a crash) | 8 (WebView2) |
 | Private memory | ~18 MB | ~664 MB |
 | CPU, idle (no mascot) | 0 (blocks in `GetMessage`) | — |
 | CPU, idle with the animated Pokémon | ~2% of one core | — |
@@ -809,6 +843,7 @@ Unlike Island, Pocket Isle stays visible in screenshots and screen recordings.
 | `volume_step` | `2` | Percent per key press / scroll notch |
 | `hide_in_fullscreen` | `true` | Step aside for games, videos and slideshows (screenshot tools excepted) |
 | `all_monitors` | `true` | An island of its own at the top of every screen (laptop and monitor), not just the main one |
+| `side_panels` | `"wings"` | Panels beside the island: `"wings"`, `"corners"`, `"both"` or `"off"` (see [Side panels](#side-panels)) |
 | `show_notifications` | `true` | Windows notifications as cards |
 | `notification_ignore` | `[]` | App names never shown, e.g. `["Microsoft Teams"]` |
 | `break_minutes` | `60` | Minutes of steady use before a 20-second eye break (0 = never) |

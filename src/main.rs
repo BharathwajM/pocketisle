@@ -28,6 +28,7 @@ mod controls;
 mod demo;
 mod events;
 mod imaging;
+mod keeper;
 mod media;
 mod movedata;
 mod national;
@@ -65,6 +66,17 @@ fn main() {
     if args.get(1).map(String::as_str) == Some("hook") {
         agent::run_hook_cli(&args[2..]);
         return;
+    }
+    // Started plainly (with Windows): keep watch over the island, restarting it after a crash.
+    if args.len() == 1 && std::env::var_os(keeper::CHILD).is_none() {
+        keeper::keep();
+        return;
+    }
+    if std::env::var_os(keeper::CHILD).is_some() {
+        // A crash ends it at once (no "stopped working" box holding it up), so it's restarted.
+        unsafe {
+            windows::Win32::System::Diagnostics::Debug::SetErrorMode(windows::Win32::System::Diagnostics::Debug::SEM_NOGPFAULTERRORBOX);
+        }
     }
     if args.get(1).map(String::as_str) == Some("demo") {
         util::set_demo();

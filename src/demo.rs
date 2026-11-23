@@ -63,6 +63,10 @@ pub fn prepare() {
         ] {
             o.insert(k.to_string(), v);
         }
+        // Which side panels to show ("wings", "corners", "off"), for pictures of each.
+        if let Ok(v) = std::env::var("POCKETISLE_DEMO_SIDES") {
+            o.insert("side_panels".to_string(), serde_json::json!(v));
+        }
     }
     let _ = std::fs::write(d.join("config.json"), serde_json::to_string_pretty(&cfg).unwrap_or_default());
     let _ = std::fs::copy(real.join("pokedex.json"), d.join("pokedex.json"));

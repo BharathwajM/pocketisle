@@ -265,9 +265,23 @@ mod pdh {
                 if PdhGetFormattedCounterArrayW(c.0, fmt, &mut size, &mut count, std::ptr::null_mut()) != MORE_DATA || size == 0 {
                     return Vec::new();
                 }
-                // 8-aligned room for the items and the names after them.
-                let mut buf = vec![0u64; (size as usize).div_ceil(8) + 1];
-                if PdhGetFormattedCounterArrayW(c.0, fmt, &mut size, &mut count, buf.as_mut_ptr() as *mut u8) != 0 {
+                // 8-aligned room for the items and the names after them, with some to spare:
+                // the GPU's list changes as programs start and stop (a lot under a game), so
+                // it can grow between asking its size and reading it. Then ask again.
+                let mut buf: Vec<u64>;
+                let mut tries = 0;
+                loop {
+                    let room = size as usize + size as usize / 2 + 1024;
+                    buf = vec![0u64; room.div_ceil(8)];
+                    size = (buf.len() * 8) as u32;
+                    count = 0;
+                    match PdhGetFormattedCounterArrayW(c.0, fmt, &mut size, &mut count, buf.as_mut_ptr() as *mut u8) {
+                        0 => break,
+                        MORE_DATA if tries < 3 => tries += 1,
+                        _ => return Vec::new(),
+                    }
+                }
+                if count as usize * std::mem::size_of::<Item>() > buf.len() * 8 {
                     return Vec::new();
                 }
                 let items = std::slice::from_raw_parts(buf.as_ptr() as *const Item, count as usize);

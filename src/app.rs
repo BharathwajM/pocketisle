@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 mod battle_fx;
 mod battle_ui;
+mod sides;
 
 use windows::core::{w, Result, HSTRING, PCWSTR, PWSTR};
 use windows::Win32::Foundation::*;
@@ -690,6 +691,14 @@ struct App {
     last_rgn: (i32, i32, i32, i32),
     /// The islands on the other screens.
     views: Vec<View>,
+    /// The panels beside the island, and the next thing on today's calendar (title, minutes
+    /// to go).
+    sides: Vec<sides::Side>,
+    side_next: Option<(String, u32)>,
+    /// The side panel opened in place (its slot and what it showed), and when it closes
+    /// after the pointer left it.
+    side_open: Option<(usize, sides::SideKind)>,
+    side_close_at: Option<Instant>,
     /// Right-drag on the pill to scrub the song: where the drag started (logical x, seconds
     /// into the track), and whether it has moved far enough to count as scrubbing.
     scrub: Option<(f32, f64, bool)>,
@@ -737,6 +746,8 @@ struct App {
     /// picker's page), the league region shown, and the ball thrown last in battle.
     battle: Option<battle_ui::BattleView>,
     battle_strips: HashMap<String, Option<Sprite>>,
+    /// The team's animated sprites, sized for the side panel.
+    side_strips: HashMap<String, Option<Sprite>>,
     team_pick: Option<usize>,
     pick_page: usize,
     league_region: usize,
@@ -819,6 +830,10 @@ struct App {
     sys_on: bool,
     cpu_hist: VecDeque<f32>,
     mem_hist: VecDeque<f32>,
+    /// The GPU's temperature (°C) each second for five minutes, and its low and high since
+    /// the island started.
+    temp_hist: VecDeque<f32>,
+    temp_range: Option<(u32, u32)>,
     gpu_hist: VecDeque<f32>,
     weather: Option<Weather>,
     ctl_dnd: Option<bool>,
@@ -845,6 +860,9 @@ struct App {
     paused_at: Option<Instant>,
     art: Option<Art>,
     art_bmp: Option<ID2D1Bitmap1>,
+    /// The art shrunk once for the song's side panel (scaling the whole picture every frame
+    /// is slow in software).
+    art_thumb: Option<ID2D1Bitmap1>,
     tint: Option<Rgba>,
     timeline: Option<(f64, f64, Instant)>,
 
@@ -914,6 +932,10 @@ fn other_monitors(main: HMONITOR) -> Vec<HMONITOR> {
 struct View {
     hwnd: HWND,
     r: Renderer,
+    /// This screen's own side panels, and the one opened in place.
+    sides: Vec<sides::Side>,
+    side_open: Option<(usize, sides::SideKind)>,
+    side_close_at: Option<Instant>,
     scale: f32,
     pill_h: f32,
     monitor: HMONITOR,
@@ -1163,7 +1185,8 @@ impl App {
         }
         // Music shows only while it plays (and briefly after a pause, so a skip or a seek
         // doesn't flicker); paused, the pill goes back to the date and time.
-        if self.media.is_some() && (self.playing || self.paused_at.is_some_and(|t| t.elapsed() < PAUSE_GRACE)) {
+        // With the song in the wing beside it, the pill keeps the date and time instead.
+        if self.media.is_some() && (self.playing || self.paused_at.is_some_and(|t| t.elapsed() < PAUSE_GRACE)) && !self.song_beside() {
             return Compact::Media;
         }
         if self.cfg.agent_status_in_pill {
@@ -1941,6 +1964,12 @@ impl App {
     }
 
     fn target(&mut self) -> (Mode, f32, f32, f32) {
+        if self.tab_on_side(self.tab) {
+            if let Some(t) = TABS.iter().copied().find(|t| !self.tab_on_side(*t)) {
+                self.tab = t;
+                self.enter_tab();
+            }
+        }
         let bh = self.pill_h;
         if matches!(self.scrub, Some((_, _, true))) {
             return (Mode::Compact, 320.0, bh, bh / 2.0);
@@ -2679,6 +2708,13 @@ impl App {
                     push(&mut self.mem_hist, if sys.mem_total > 0 { sys.mem_used as f32 / sys.mem_total as f32 } else { 0.0 });
                     if let Some(g) = &sys.gpu {
                         push(&mut self.gpu_hist, g.util);
+                        if let Some(t) = g.temp {
+                            self.temp_hist.push_back(t as f32);
+                            while self.temp_hist.len() > 300 {
+                                self.temp_hist.pop_front();
+                            }
+                            self.temp_range = Some(self.temp_range.map_or((t, t), |(lo, hi)| (lo.min(t), hi.max(t))));
+                        }
                     }
                     self.sys = Some(sys);
                 }
@@ -2730,6 +2766,7 @@ impl App {
                 }
                 Event::MediaArt(a) => {
                     self.art_bmp = a.as_ref().and_then(|a| self.r.bitmap(a));
+                    self.art_thumb = a.as_ref().and_then(|a| self.r.bitmap(&sides::thumb(a)));
                     self.tint = a.as_ref().map(|a| Rgba::from_f(a.tint));
                     // The song peek takes the new artwork's colour.
                     if let (Some(c), Some(t)) = (self.card.as_mut().filter(|c| c.kind == CardKind::Song), self.tint) {
@@ -2826,6 +2863,7 @@ impl App {
                 Event::Download { path, size } => self.download_card(path, size),
                 Event::GitHub(notes) => self.github_cards(notes),
                 Event::Heat(h) => self.heat_card(h),
+                Event::Glance => {}
                 Event::ScanProgress => self.dirty = true,
                 Event::Net(n) => {
                     if let Some(old) = self.net.replace(n.clone()) {
@@ -3250,6 +3288,13 @@ impl App {
         if soon != self.meeting {
             self.meeting = soon;
             self.dirty = true;
+        }
+        if !self.sides.is_empty() {
+            let next = self.cal.upcoming(&calendar::local_now(), 24 * 60);
+            if next != self.side_next {
+                self.side_next = next;
+                self.dirty = true;
+            }
         }
         let clock = calendar::clock_text();
         if clock != self.clock {
@@ -6562,203 +6607,7 @@ impl App {
             }
             Mode::Expanded => {
                 if let Some((_, b)) = self.buttons.iter().find(|(r, _)| r.contains(x, y)).copied() {
-                    match b {
-                        Btn::Prev => drop(self.media_tx.send(MediaCmd::Prev)),
-                        Btn::PlayPause => drop(self.media_tx.send(MediaCmd::PlayPause)),
-                        Btn::Next => drop(self.media_tx.send(MediaCmd::Next)),
-                        Btn::Tab(t) => {
-                            self.tab = t;
-                            self.enter_tab();
-                        }
-                        Btn::ShelfFile(i) if !self.shelf_dragged => {
-                            if let Some(p) = self.shelf.get(i).cloned() {
-                                if p.exists() {
-                                    self.expanded = false;
-                                    open_path(&p);
-                                } else {
-                                    self.shelf.remove(i);
-                                    crate::shelf::save(&self.shelf);
-                                }
-                            }
-                        }
-                        Btn::ShelfFile(_) => {}
-                        Btn::ShelfRemove(i) => {
-                            if i < self.shelf.len() {
-                                self.shelf.remove(i);
-                                crate::shelf::save(&self.shelf);
-                            }
-                        }
-                        Btn::Clip(i) => self.recopy(i),
-                        Btn::ClipPage(d) => {
-                            let pages = self.clips.len().div_ceil(CLIP_ROWS).max(1) as i32;
-                            self.clip_page = (self.clip_page as i32 + d).rem_euclid(pages) as usize;
-                        }
-                        Btn::ClipRemove(i) => {
-                            if i < self.clips.len() {
-                                self.clips.remove(i);
-                                self.save_clips();
-                            }
-                        }
-                        Btn::ClipClear => {
-                            self.clips.clear();
-                            self.clip_page = 0;
-                            self.save_clips();
-                        }
-                        Btn::CardFolder | Btn::CardShelf | Btn::CardCopy => {}
-                        Btn::Medal(_) => {}
-                        Btn::Buddy(name) => self.set_buddy(name),
-                        Btn::Fish => {
-                            self.toggle_fishing();
-                            if self.fishing.is_some() {
-                                self.expanded = false;
-                            }
-                        }
-                        Btn::WallNext => {
-                            if self.wpe_asked.map_or(true, |t| t.elapsed() > Duration::from_secs(4)) {
-                                self.wpe_asked = Some(Instant::now());
-                                crate::wpe::change_now();
-                            }
-                        }
-                        Btn::Output(i) => {
-                            if let Some(o) = self.outputs.get(i).cloned() {
-                                if !o.default {
-                                    let ok = crate::devices::set_default_output(&o.id);
-                                    util::log(&format!("sound output: {} ({}) {}", o.name, o.hw, if ok { "is the default now" } else { "couldn't be switched" }));
-                                    self.refresh_outputs();
-                                }
-                            }
-                        }
-                        Btn::Note(i) => {
-                            if let Some(n) = self.notes.get_mut(i) {
-                                n.done = !n.done;
-                                crate::notes::save(&self.notes);
-                            }
-                        }
-                        Btn::NoteRemove(i) => {
-                            if i < self.notes.len() {
-                                self.notes.remove(i);
-                                crate::notes::save(&self.notes);
-                            }
-                        }
-                        Btn::NotesClear => {
-                            self.notes.retain(|n| !n.done);
-                            crate::notes::save(&self.notes);
-                        }
-                        Btn::NoteAdd => {
-                            self.note_typing = true;
-                            unsafe {
-                                let _ = SetForegroundWindow(self.hwnd);
-                                let _ = SetFocus(Some(self.hwnd));
-                            }
-                        }
-                        Btn::Ball(b) => {
-                            if b == 0 || self.dex.bag.count(b).unwrap_or(0) > 0 {
-                                self.dex.bag.pick = b;
-                                self.dex.save();
-                            }
-                        }
-                        Btn::DexView(v) => {
-                            self.dex_card = v == 2;
-                            self.dex_bag = v == 5;
-                            self.dex_quests = v == 6;
-                            self.dex_legends = v == 7;
-                            let grid = v != 2 && v != 5 && v != 6 && v != 7;
-                            if grid && ((v == 3) != self.dex_forms || (v == 4) != self.dex_shiny) {
-                                self.dex_page = 0;
-                            }
-                            if grid {
-                                self.dex_forms = v == 3;
-                                self.dex_shiny = v == 4;
-                            }
-                            if v < 2 {
-                                self.dex.by_type = v == 1;
-                                self.dex.save();
-                            }
-                        }
-                        Btn::Bt(b) => self.bt_click(b),
-                        Btn::DexPage(d) if self.dex_legends => {
-                            let pages = pokemon::legends_by_region().len() as i32;
-                            self.legend_page = (self.legend_page as i32 + d).rem_euclid(pages) as usize;
-                        }
-                        Btn::DexPage(d) => {
-                            let pages = self.dex_pages.max(1) as i32;
-                            self.dex_page = (self.dex_page as i32 + d).rem_euclid(pages) as usize;
-                        }
-                        Btn::SysSort(m) => self.sys_by_mem = m,
-                        Btn::Kill(i) => self.close_app(i),
-                        Btn::Shortcut(i) => {
-                            if let Some(sc) = self.cfg.shortcuts.get(i).cloned() {
-                                self.expanded = false;
-                                controls::launch(&sc);
-                            }
-                        }
-                        Btn::Quick(q) => self.quick(q),
-                        Btn::SysPage(p) => {
-                            self.sys_page = p;
-                            if p == 4 {
-                                // Fresh sizes each time the Storage page is opened.
-                                crate::scan::close();
-                                crate::scan::forget(std::path::Path::new(""));
-                            }
-                        }
-                        Btn::SysBack => self.sys_back(),
-                        Btn::Drive(i) => {
-                            if let Some(d) = self.sys.as_ref().and_then(|s| s.drives.get(i)).cloned() {
-                                self.scan_page = 0;
-                                crate::scan::open(std::path::PathBuf::from(format!("{}\\", d.root)), scan_wake);
-                            }
-                        }
-                        Btn::ScanRow(i) => {
-                            let l = crate::scan::current();
-                            if let Some(e) = l.entries.get(i) {
-                                let p = l.path.join(&e.name);
-                                if e.dir {
-                                    self.scan_page = 0;
-                                    crate::scan::open(p, scan_wake);
-                                } else {
-                                    crate::scan::reveal(&p, true);
-                                }
-                            }
-                        }
-                        Btn::ScanPage(d) => {
-                            let n = crate::scan::current().entries.len().div_ceil(SCAN_ROWS).max(1) as i32;
-                            self.scan_page = (self.scan_page as i32 + d).clamp(0, n - 1) as usize;
-                        }
-                        Btn::ScanExplorer => {
-                            let l = crate::scan::current();
-                            if !l.path.as_os_str().is_empty() {
-                                crate::scan::reveal(&l.path, false);
-                            }
-                        }
-                        Btn::GameOpen => crate::games::pick(),
-                        Btn::GamePlay(i) => self.play_game(i),
-                        Btn::GameRemove(i) => {
-                            if i < self.games.len() {
-                                self.games.remove(i);
-                                crate::games::save(&self.games);
-                            }
-                        }
-                        Btn::GameShow => crate::games::show(),
-                        Btn::GameStop => crate::games::stop(),
-                        Btn::DndBar => {
-                            self.quick(Quick::Dnd);
-                            util::log(&format!("do not disturb {} from the tab bar", if self.ctl_dnd == Some(true) { "on" } else { "off" }));
-                        }
-                        Btn::Slider(_) | Btn::Decide(_) => {}
-                        Btn::Power(act) => {
-                            if !act.needs_confirm() || self.armed == Some(act) {
-                                self.armed = None;
-                                self.expanded = false;
-                                act.run();
-                            } else {
-                                // Ending the session: ask for a second click.
-                                self.armed = Some(act);
-                                unsafe {
-                                    SetTimer(Some(main_hwnd()), T_ARM, 4000, None);
-                                }
-                            }
-                        }
-                    }
+                    self.press(b);
                 } else {
                     self.defer_click(false);
                 }
@@ -6767,6 +6616,207 @@ impl App {
             Mode::Osd => self.osd = None,
         }
         self.dirty = true;
+    }
+
+    /// What a button on the open island (or an opened side panel) does.
+    pub(super) fn press(&mut self, b: Btn) {
+        match b {
+            Btn::Prev => drop(self.media_tx.send(MediaCmd::Prev)),
+            Btn::PlayPause => drop(self.media_tx.send(MediaCmd::PlayPause)),
+            Btn::Next => drop(self.media_tx.send(MediaCmd::Next)),
+            Btn::Tab(t) => {
+                self.tab = t;
+                self.enter_tab();
+            }
+            Btn::ShelfFile(i) if !self.shelf_dragged => {
+                if let Some(p) = self.shelf.get(i).cloned() {
+                    if p.exists() {
+                        self.expanded = false;
+                        open_path(&p);
+                    } else {
+                        self.shelf.remove(i);
+                        crate::shelf::save(&self.shelf);
+                    }
+                }
+            }
+            Btn::ShelfFile(_) => {}
+            Btn::ShelfRemove(i) => {
+                if i < self.shelf.len() {
+                    self.shelf.remove(i);
+                    crate::shelf::save(&self.shelf);
+                }
+            }
+            Btn::Clip(i) => self.recopy(i),
+            Btn::ClipPage(d) => {
+                let pages = self.clips.len().div_ceil(CLIP_ROWS).max(1) as i32;
+                self.clip_page = (self.clip_page as i32 + d).rem_euclid(pages) as usize;
+            }
+            Btn::ClipRemove(i) => {
+                if i < self.clips.len() {
+                    self.clips.remove(i);
+                    self.save_clips();
+                }
+            }
+            Btn::ClipClear => {
+                self.clips.clear();
+                self.clip_page = 0;
+                self.save_clips();
+            }
+            Btn::CardFolder | Btn::CardShelf | Btn::CardCopy => {}
+            Btn::Medal(_) => {}
+            Btn::Buddy(name) => self.set_buddy(name),
+            Btn::Fish => {
+                self.toggle_fishing();
+                if self.fishing.is_some() {
+                    self.expanded = false;
+                }
+            }
+            Btn::WallNext => {
+                if self.wpe_asked.map_or(true, |t| t.elapsed() > Duration::from_secs(4)) {
+                    self.wpe_asked = Some(Instant::now());
+                    crate::wpe::change_now();
+                }
+            }
+            Btn::Output(i) => {
+                if let Some(o) = self.outputs.get(i).cloned() {
+                    if !o.default {
+                        let ok = crate::devices::set_default_output(&o.id);
+                        util::log(&format!("sound output: {} ({}) {}", o.name, o.hw, if ok { "is the default now" } else { "couldn't be switched" }));
+                        self.refresh_outputs();
+                    }
+                }
+            }
+            Btn::Note(i) => {
+                if let Some(n) = self.notes.get_mut(i) {
+                    n.done = !n.done;
+                    crate::notes::save(&self.notes);
+                }
+            }
+            Btn::NoteRemove(i) => {
+                if i < self.notes.len() {
+                    self.notes.remove(i);
+                    crate::notes::save(&self.notes);
+                }
+            }
+            Btn::NotesClear => {
+                self.notes.retain(|n| !n.done);
+                crate::notes::save(&self.notes);
+            }
+            Btn::NoteAdd => {
+                self.note_typing = true;
+                unsafe {
+                    let _ = SetForegroundWindow(self.hwnd);
+                    let _ = SetFocus(Some(self.hwnd));
+                }
+            }
+            Btn::Ball(b) => {
+                if b == 0 || self.dex.bag.count(b).unwrap_or(0) > 0 {
+                    self.dex.bag.pick = b;
+                    self.dex.save();
+                }
+            }
+            Btn::DexView(v) => {
+                self.dex_card = v == 2;
+                self.dex_bag = v == 5;
+                self.dex_quests = v == 6;
+                self.dex_legends = v == 7;
+                let grid = v != 2 && v != 5 && v != 6 && v != 7;
+                if grid && ((v == 3) != self.dex_forms || (v == 4) != self.dex_shiny) {
+                    self.dex_page = 0;
+                }
+                if grid {
+                    self.dex_forms = v == 3;
+                    self.dex_shiny = v == 4;
+                }
+                if v < 2 {
+                    self.dex.by_type = v == 1;
+                    self.dex.save();
+                }
+            }
+            Btn::Bt(b) => self.bt_click(b),
+            Btn::DexPage(d) if self.dex_legends => {
+                let pages = pokemon::legends_by_region().len() as i32;
+                self.legend_page = (self.legend_page as i32 + d).rem_euclid(pages) as usize;
+            }
+            Btn::DexPage(d) => {
+                let pages = self.dex_pages.max(1) as i32;
+                self.dex_page = (self.dex_page as i32 + d).rem_euclid(pages) as usize;
+            }
+            Btn::SysSort(m) => self.sys_by_mem = m,
+            Btn::Kill(i) => self.close_app(i),
+            Btn::Shortcut(i) => {
+                if let Some(sc) = self.cfg.shortcuts.get(i).cloned() {
+                    self.expanded = false;
+                    controls::launch(&sc);
+                }
+            }
+            Btn::Quick(q) => self.quick(q),
+            Btn::SysPage(p) => {
+                self.sys_page = p;
+                if p == 4 {
+                    // Fresh sizes each time the Storage page is opened.
+                    crate::scan::close();
+                    crate::scan::forget(std::path::Path::new(""));
+                }
+            }
+            Btn::SysBack => self.sys_back(),
+            Btn::Drive(i) => {
+                if let Some(d) = self.sys.as_ref().and_then(|s| s.drives.get(i)).cloned() {
+                    self.scan_page = 0;
+                    crate::scan::open(std::path::PathBuf::from(format!("{}\\", d.root)), scan_wake);
+                }
+            }
+            Btn::ScanRow(i) => {
+                let l = crate::scan::current();
+                if let Some(e) = l.entries.get(i) {
+                    let p = l.path.join(&e.name);
+                    if e.dir {
+                        self.scan_page = 0;
+                        crate::scan::open(p, scan_wake);
+                    } else {
+                        crate::scan::reveal(&p, true);
+                    }
+                }
+            }
+            Btn::ScanPage(d) => {
+                let n = crate::scan::current().entries.len().div_ceil(SCAN_ROWS).max(1) as i32;
+                self.scan_page = (self.scan_page as i32 + d).clamp(0, n - 1) as usize;
+            }
+            Btn::ScanExplorer => {
+                let l = crate::scan::current();
+                if !l.path.as_os_str().is_empty() {
+                    crate::scan::reveal(&l.path, false);
+                }
+            }
+            Btn::GameOpen => crate::games::pick(),
+            Btn::GamePlay(i) => self.play_game(i),
+            Btn::GameRemove(i) => {
+                if i < self.games.len() {
+                    self.games.remove(i);
+                    crate::games::save(&self.games);
+                }
+            }
+            Btn::GameShow => crate::games::show(),
+            Btn::GameStop => crate::games::stop(),
+            Btn::DndBar => {
+                self.quick(Quick::Dnd);
+                util::log(&format!("do not disturb {} from the tab bar", if self.ctl_dnd == Some(true) { "on" } else { "off" }));
+            }
+            Btn::Slider(_) | Btn::Decide(_) => {}
+            Btn::Power(act) => {
+                if !act.needs_confirm() || self.armed == Some(act) {
+                    self.armed = None;
+                    self.expanded = false;
+                    act.run();
+                } else {
+                    // Ending the session: ask for a second click.
+                    self.armed = Some(act);
+                    unsafe {
+                        SetTimer(Some(main_hwnd()), T_ARM, 4000, None);
+                    }
+                }
+            }
+        }
     }
 
     fn quick(&mut self, q: Quick) {
@@ -7387,6 +7437,9 @@ impl App {
         for v in self.views.drain(..) {
             crate::shelf::stop_drops(v.hwnd);
             unsafe {
+                for s in &v.sides {
+                    let _ = DestroyWindow(s.hwnd);
+                }
                 let _ = DestroyWindow(v.hwnd);
             }
         }
@@ -7430,6 +7483,9 @@ impl App {
                     self.views.push(View {
                         hwnd,
                         r,
+                        sides: Vec::new(),
+                        side_open: None,
+                        side_close_at: None,
                         scale: p.scale,
                         pill_h,
                         monitor: p.monitor,
@@ -7476,12 +7532,23 @@ impl App {
                 }
             }
         }
+        // Each screen's island gets its own side panels.
+        for i in 0..self.views.len() {
+            let mut v = self.views.remove(i);
+            self.swap_view(&mut v);
+            self.sync_own_sides();
+            self.swap_view(&mut v);
+            self.views.insert(i, v);
+        }
         self.dirty = true;
     }
 
     fn swap_view(&mut self, v: &mut View) {
         std::mem::swap(&mut self.hwnd, &mut v.hwnd);
         std::mem::swap(&mut self.r, &mut v.r);
+        std::mem::swap(&mut self.sides, &mut v.sides);
+        std::mem::swap(&mut self.side_open, &mut v.side_open);
+        std::mem::swap(&mut self.side_close_at, &mut v.side_close_at);
         std::mem::swap(&mut self.scale, &mut v.scale);
         std::mem::swap(&mut self.pill_h, &mut v.pill_h);
         std::mem::swap(&mut self.monitor, &mut v.monitor);
@@ -7544,7 +7611,7 @@ impl App {
     }
 
     fn any_needs_frames(&mut self) -> bool {
-        self.each_view(|a| a.needs_frames()).into_iter().any(|b| b)
+        self.each_view(|a| a.needs_frames() || a.sides_busy()).into_iter().any(|b| b)
     }
 
     /// Draw every island that needs it; how long to wait before the next frame.
@@ -7553,19 +7620,20 @@ impl App {
         let dirty = self.dirty;
         let waits = self.each_view(|a| {
             a.dirty = dirty;
-            if a.needs_frames() {
+            let pill = if a.needs_frames() {
                 a.frame();
                 Some(a.frame_wait_ms())
             } else {
                 None
-            }
+            };
+            [pill, a.frame_sides(dirty)].into_iter().flatten().min()
         });
-
         self.dirty = false;
         if self.device_lost {
             self.device_lost = false;
             self.recreate_renderer();
             self.sync_views();
+            self.sync_sides();
         }
         waits.into_iter().flatten().min().unwrap_or(0)
     }
@@ -7611,6 +7679,7 @@ impl App {
         HOOK_ON.store(self.cfg.hijack_volume_keys && self.audio.is_some(), Ordering::SeqCst);
         self.r.set_fonts(&self.theme.font, &self.theme.icon_font);
         self.reposition();
+        self.sync_sides();
     }
 
     fn recreate_renderer(&mut self) {
@@ -7619,6 +7688,7 @@ impl App {
             Ok(r) => {
                 self.r = r;
                 self.art_bmp = self.art.as_ref().and_then(|a| self.r.bitmap(a));
+                self.art_thumb = self.art.as_ref().and_then(|a| self.r.bitmap(&sides::thumb(a)));
                 self.card_bmp = self.card.as_ref().and_then(|c| c.icon.as_ref()).and_then(|a| self.r.bitmap(a));
                 self.strips.clear();
                 self.drawn = [R::new(0.0, 0.0, WIN_W, WIN_H); 2];
@@ -7697,7 +7767,7 @@ impl App {
                 self.tab_w[i].step(dt);
             }
         }
-        let want_sys = self.visible && self.mode == Mode::Expanded && self.tab == Tab::System;
+        let want_sys = (self.visible && self.mode == Mode::Expanded && self.tab == Tab::System) || self.sides_want_sys();
         if want_sys != self.sys_on {
             self.sys_on = want_sys;
             sysinfo::set_active(want_sys);
@@ -8378,6 +8448,10 @@ impl App {
             if i == RIGHT_TABS {
                 left_end = x;
                 x = x1 - right_w;
+            }
+            // Shown by a side panel instead (opened in place).
+            if self.tab_on_side(tab) {
+                continue;
             }
             let w = self.tab_w[i].v.max(TAB_H);
             let r = R::xywh(x, y, w, TAB_H);
@@ -9895,6 +9969,7 @@ pub fn run() -> Result<()> {
         };
         RegisterClassExW(&wc);
         RegisterClassExW(&WNDCLASSEXW { lpszClassName: MIRROR_CLASS, ..wc });
+        RegisterClassExW(&WNDCLASSEXW { lpszClassName: sides::SIDE_CLASS, lpfnWndProc: Some(sides::side_proc), ..wc });
 
         let p = placement(&theme, &cfg);
         let demo = util::demo();
@@ -10034,6 +10109,7 @@ pub fn run() -> Result<()> {
             legend_page: 0,
             battle: None,
             battle_strips: HashMap::new(),
+            side_strips: HashMap::new(),
             team_pick: None,
             pick_page: 0,
             league_region: 0,
@@ -10086,6 +10162,8 @@ pub fn run() -> Result<()> {
             sys_on: false,
             cpu_hist: VecDeque::new(),
             mem_hist: VecDeque::new(),
+            temp_hist: VecDeque::new(),
+            temp_range: None,
             gpu_hist: VecDeque::new(),
             weather: None,
             ctl_dnd: None,
@@ -10108,6 +10186,7 @@ pub fn run() -> Result<()> {
             paused_at: None,
             art: None,
             art_bmp: None,
+            art_thumb: None,
             tint: None,
             timeline: None,
             agents: Vec::new(),
@@ -10122,6 +10201,10 @@ pub fn run() -> Result<()> {
             cal: Calendar::new(),
             cal_today: Vec::new(),
             cal_next: None,
+            sides: Vec::new(),
+            side_next: None,
+            side_open: None,
+            side_close_at: None,
             today: calendar::local_now().date,
             clock: calendar::clock_text(),
             audio,
@@ -10176,6 +10259,7 @@ pub fn run() -> Result<()> {
             a.check_wallpaper();
             a.update_visibility();
             a.sync_views();
+            a.sync_sides();
         });
         util::log("started");
 

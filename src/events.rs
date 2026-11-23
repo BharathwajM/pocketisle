@@ -69,6 +69,9 @@ pub enum Event {
     GitHub(Vec<crate::github::Note>),
     /// The CPU or GPU has been running hot for a while.
     Heat(crate::heat::Heat),
+    /// The microphone was muted or unmuted, or a restart for an update started or stopped
+    /// waiting (for the panels beside the island).
+    Glance,
 }
 
 pub fn init(hwnd: HWND) -> Receiver<Event> {

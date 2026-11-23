@@ -51,12 +51,67 @@ struct Box_ {
     /// The name of the node that carries the battery (the device itself).
     pct_name: String,
     pct: Option<u8>,
+    /// The battery came from a connected link (a phone keeps an old reading on the link
+    /// it isn't using, beside the live one).
+    pct_live: bool,
     connected: Option<bool>,
     classes: Vec<u128>,
+    /// Its Bluetooth LE address, to ask it for its battery itself.
+    ble: Option<u64>,
+}
+
+/// A Bluetooth device that's connected, with its battery when Windows knows it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BtDevice {
+    pub name: String,
+    pub kind: DevKind,
+    pub pct: Option<u8>,
 }
 
 /// Every Bluetooth device Windows reports a battery for, connected ones only.
 pub fn batteries() -> Vec<Battery> {
+    let mut out: Vec<Battery> = scan()
+        .into_iter()
+        .filter_map(|e| {
+            let pct = e.pct?;
+            if e.connected == Some(false) {
+                return None;
+            }
+            let name = [e.pct_name, e.bt_name, e.name].into_iter().find(|n| !n.is_empty())?;
+            let kind = kind_of(&e.classes, &name);
+            Some(Battery { name: tidy(&name), pct, kind })
+        })
+        .collect();
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out.dedup_by(|a, b| a.name == b.name);
+    out
+}
+
+/// Every Bluetooth device that's connected now (and any reporting a battery that isn't
+/// known to be off), with its battery if Windows has one.
+pub fn bluetooth() -> Vec<BtDevice> {
+    let mut out: Vec<BtDevice> = scan()
+        .into_iter()
+        .filter_map(|e| {
+            let on = e.connected == Some(true) && e.classes.contains(&CLASS_BLUETOOTH);
+            if !on && (e.pct.is_none() || e.connected == Some(false)) {
+                return None;
+            }
+            let name = [e.pct_name, e.bt_name, e.name].into_iter().find(|n| !n.is_empty())?;
+            let kind = kind_of(&e.classes, &name);
+            // Windows refreshes its copy only now and then (a phone's can be hours old): ask
+            // the device itself when it's connected over Bluetooth LE.
+            let fresh = e.ble.filter(|_| on).and_then(fresh_battery);
+            Some(BtDevice { name: tidy(&name), kind, pct: fresh.or(e.pct) })
+        })
+        .collect();
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out.dedup_by(|a, b| a.name == b.name);
+    out
+}
+
+/// Every device outside the PC, gathered by container (one physical device).
+fn scan() -> Vec<Box_> {
     let mut by: Vec<(String, Box_)> = Vec::new();
     unsafe {
         let Ok(set) = SetupDiGetClassDevsW(None, PCWSTR::null(), None, DIGCF_ALLCLASSES | DIGCF_PRESENT) else { return Vec::new() };
@@ -83,6 +138,7 @@ pub fn batteries() -> Vec<Battery> {
             let pct = (SetupDiGetDevicePropertyW(set, &d, &BATTERY, &mut ty, Some(&mut b), None, 0).is_ok() && b[0] <= 100).then_some(b[0]);
             let mut on = [0u8; 1];
             let connected = SetupDiGetDevicePropertyW(set, &d, &CONNECTED, &mut ty, Some(&mut on), None, 0).is_ok().then_some(on[0] != 0);
+            let ble = if connected == Some(true) { ble_address(set, &d) } else { None };
             let slot = match by.iter().position(|(k, _)| *k == container) {
                 Some(j) => j,
                 None => {
@@ -95,8 +151,10 @@ pub fn batteries() -> Vec<Battery> {
             if class == CLASS_BLUETOOTH && real && e.bt_name.is_empty() {
                 e.bt_name = name.clone();
             }
-            if pct.is_some() {
+            let live = connected == Some(true);
+            if pct.is_some() && (live || !e.pct_live) {
                 e.pct = pct;
+                e.pct_live = live;
                 if real && e.pct_name.is_empty() {
                     e.pct_name = name.clone();
                 }
@@ -110,24 +168,13 @@ pub fn batteries() -> Vec<Battery> {
             if !e.classes.contains(&class) {
                 e.classes.push(class);
             }
+            if ble.is_some() {
+                e.ble = ble;
+            }
         }
         let _ = SetupDiDestroyDeviceInfoList(set);
     }
-    let mut out: Vec<Battery> = by
-        .into_iter()
-        .filter_map(|(_, e)| {
-            let pct = e.pct?;
-            if e.connected == Some(false) {
-                return None;
-            }
-            let name = [e.pct_name, e.bt_name, e.name].into_iter().find(|n| !n.is_empty())?;
-            let kind = kind_of(&e.classes, &name);
-            Some(Battery { name: tidy(&name), pct, kind })
-        })
-        .collect();
-    out.sort_by(|a, b| a.name.cmp(&b.name));
-    out.dedup_by(|a, b| a.name == b.name);
-    out
+    by.into_iter().map(|(_, e)| e).collect()
 }
 
 fn kind_of(classes: &[u128], name: &str) -> DevKind {
@@ -159,12 +206,105 @@ fn generic(name: &str) -> bool {
 /// "WH-1000XM4 Hands-Free AG" → "WH-1000XM4".
 fn tidy(name: &str) -> String {
     let mut s = name.trim().to_string();
-    for tail in [" Hands-Free AG Audio", " Hands-Free AG", " Hands-Free", " Avrcp Transport", " Stereo", " LE"] {
+    for tail in [" Hands-Free AG Audio", " Hands-Free AG", " Hands-Free HF", " Hands-Free", " Avrcp Transport", " Stereo", " LE"] {
         if let Some(t) = s.strip_suffix(tail) {
             s = t.trim().to_string();
         }
     }
     s
+}
+
+/// "BTHLE\DEV_A1B2C3D4E5F6\…" → 0xA1B2C3D4E5F6.
+unsafe fn ble_address(set: HDEVINFO, d: &SP_DEVINFO_DATA) -> Option<u64> {
+    let mut buf = [0u16; 256];
+    SetupDiGetDeviceInstanceIdW(set, d, Some(&mut buf), None).ok()?;
+    let id = String::from_utf16_lossy(&buf[..buf.iter().position(|c| *c == 0).unwrap_or(buf.len())]);
+    parse_ble_id(&id)
+}
+
+fn parse_ble_id(id: &str) -> Option<u64> {
+    let id = id.to_ascii_uppercase();
+    let hex = id.strip_prefix("BTHLE\\DEV_")?.get(..12)?;
+    u64::from_str_radix(hex, 16).ok()
+}
+
+/// How often a device is asked for its battery (each ask wakes its radio a moment).
+const ASK_EVERY: std::time::Duration = std::time::Duration::from_secs(60);
+
+type Asked = Vec<(u64, std::time::Instant, Option<u8>)>;
+static ASKED: std::sync::Mutex<Asked> = std::sync::Mutex::new(Vec::new());
+static ASK_SOON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Ask the devices for their batteries on the next scan (the panel was just opened).
+pub fn ask_soon() {
+    ASK_SOON.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// A device's battery as it reports it now, asked at most once a minute (or sooner after
+/// `ask_soon`). None when it doesn't answer.
+fn fresh_battery(addr: u64) -> Option<u8> {
+    let soon = ASK_SOON.swap(false, std::sync::atomic::Ordering::SeqCst);
+    if let Ok(asked) = ASKED.lock() {
+        if let Some((_, at, v)) = asked.iter().find(|(a, _, _)| *a == addr) {
+            if !soon && at.elapsed() < ASK_EVERY {
+                return *v;
+            }
+        }
+    }
+    // On its own thread: a device that doesn't answer mustn't hold up the rest.
+    let (tx, rx) = std::sync::mpsc::channel();
+    let _ = std::thread::Builder::new().name("ble-battery".into()).spawn(move || {
+        let _ = tx.send(ask_battery(addr));
+    });
+    let v = rx.recv_timeout(std::time::Duration::from_secs(6)).ok().flatten();
+    if let Ok(mut asked) = ASKED.lock() {
+        asked.retain(|(a, _, _)| *a != addr);
+        asked.push((addr, std::time::Instant::now(), v));
+    }
+    v
+}
+
+/// Read the standard Battery Level from a Bluetooth LE device, past Windows' cache.
+fn ask_battery(addr: u64) -> Option<u8> {
+    use windows::Devices::Bluetooth::GenericAttributeProfile::{GattCharacteristicUuids, GattCommunicationStatus, GattServiceUuids};
+    use windows::Devices::Bluetooth::{BluetoothCacheMode, BluetoothLEDevice};
+    use windows::Storage::Streams::DataReader;
+    unsafe {
+        let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_MULTITHREADED);
+    }
+    let dev = BluetoothLEDevice::FromBluetoothAddressAsync(addr).ok()?.join().ok()?;
+    let read = || -> windows::core::Result<Option<u8>> {
+        let found = dev.GetGattServicesForUuidWithCacheModeAsync(GattServiceUuids::Battery()?, BluetoothCacheMode::Cached)?.join()?;
+        if found.Status()? != GattCommunicationStatus::Success {
+            return Ok(None);
+        }
+        let mut out = None;
+        for svc in found.Services()? {
+            if out.is_none() {
+                let chars = svc.GetCharacteristicsForUuidWithCacheModeAsync(GattCharacteristicUuids::BatteryLevel()?, BluetoothCacheMode::Cached)?.join()?;
+                if chars.Status()? == GattCommunicationStatus::Success {
+                    for ch in chars.Characteristics()? {
+                        let r = ch.ReadValueWithCacheModeAsync(BluetoothCacheMode::Uncached)?.join()?;
+                        if r.Status()? == GattCommunicationStatus::Success {
+                            let buf = r.Value()?;
+                            if buf.Length()? >= 1 {
+                                let v = DataReader::FromBuffer(&buf)?.ReadByte()?;
+                                if v <= 100 {
+                                    out = Some(v);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            let _ = svc.Close();
+        }
+        Ok(out)
+    };
+    let v = read().ok().flatten();
+    let _ = dev.Close();
+    v
 }
 
 unsafe fn string_prop(set: HDEVINFO, d: &SP_DEVINFO_DATA, key: &DEVPROPKEY) -> String {
@@ -282,6 +422,24 @@ mod tests {
         }
         for o in outputs() {
             println!("output: {} | {} | form {} | default {}", o.name, o.hw, o.form, o.default);
+        }
+    }
+}
+
+#[cfg(test)]
+mod ble_tests {
+    #[test]
+    fn reads_ble_ids() {
+        assert_eq!(super::parse_ble_id(r"BTHLE\DEV_A1B2C3D4E5F6\7&1A2B3C4D&0&A1B2C3D4E5F6"), Some(0xA1B2C3D4E5F6));
+        assert_eq!(super::parse_ble_id(r"BTHENUM\DEV_0A1B2C3D4E5F\x"), None);
+    }
+
+    /// Asks the connected devices for their batteries (needs real devices nearby).
+    #[test]
+    #[ignore]
+    fn ble_probe() {
+        for d in super::bluetooth() {
+            println!("{:?}", d);
         }
     }
 }

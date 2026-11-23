@@ -93,6 +93,10 @@ pub struct Config {
     pub accent_from_wallpaper: bool,
     /// Hang the island from the top edge of the screen (off = a floating pill).
     pub attach_to_top: bool,
+    /// Panels beside the island: "wings" (beside the pill: your limits and what's next, or
+    /// the song and the next few hours while music plays), "corners" (your team at the far
+    /// left, the PC at the far right), "both" or "off".
+    pub side_panels: String,
     /// Show Pip, the little pixel island that reacts to what's going on.
     pub mascot: bool,
     /// The mascot is a Pokémon (Rayquaza, or one matching the music's colour) instead of Pip.
@@ -216,6 +220,7 @@ impl Default for Config {
             decisions_when_claude_focused: false,
             accent_from_wallpaper: true,
             attach_to_top: true,
+            side_panels: "wings".into(),
             mascot: true,
             mascot_pokemon: true,
             agent_status_in_pill: false,
