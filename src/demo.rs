@@ -60,10 +60,11 @@ pub fn prepare() {
             ("meeting_sign_minutes", serde_json::json!(0)),
             ("agent_status_in_pill", serde_json::json!(true)),
             ("clock_in_pill", serde_json::json!(true)),
+            ("side_panels", serde_json::json!("both")),
         ] {
             o.insert(k.to_string(), v);
         }
-        // Which side panels to show ("wings", "corners", "off"), for pictures of each.
+        // Other side panels ("wings", "corners", "off"), for pictures of each.
         if let Ok(v) = std::env::var("POCKETISLE_DEMO_SIDES") {
             o.insert("side_panels".to_string(), serde_json::json!(v));
         }
@@ -214,6 +215,9 @@ unsafe extern "system" fn backdrop_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LP
 /// A plain window behind the island (x, y, w, h in screen pixels), and a note of where it is
 /// so a recording can crop to it.
 pub fn backdrop(x: i32, y: i32, w: i32, h: i32) {
+    // The whole width of the (main) screen, so the side panels at its edges have it too.
+    let (bx, bw) = unsafe { (0, windows::Win32::UI::WindowsAndMessaging::GetSystemMetrics(windows::Win32::UI::WindowsAndMessaging::SM_CXSCREEN)) };
+    let (bx, bw) = if bw > 0 { (bx, bw) } else { (x, w) };
     unsafe {
         let Ok(hm) = GetModuleHandleW(None) else { return };
         let hinst: HINSTANCE = hm.into();
@@ -230,9 +234,9 @@ pub fn backdrop(x: i32, y: i32, w: i32, h: i32) {
             w!("PocketIsleDemoBackdrop"),
             w!("Pocket Isle demo"),
             WS_POPUP | WS_VISIBLE,
-            x,
+            bx,
             y,
-            w,
+            bw,
             h,
             None,
             None,
@@ -280,11 +284,29 @@ pub fn usage() -> Vec<crate::usage::Usage> {
     ]
 }
 
-/// The System tab with made-up Bluetooth devices (theirs have names).
+/// The System tab with made-up hardware, apps and Bluetooth devices: the demo shows none of
+/// this PC's own (its load and temperature are live, so the graphs move).
 pub fn scrub_sys(s: &mut crate::sysinfo::Sys) {
     use crate::devices::{Battery, DevKind};
-    // The recorder isn't part of the show.
-    s.procs.retain(|p| !p.name.to_lowercase().contains("ffmpeg") && !p.exe.to_lowercase().contains("ffmpeg"));
+    use crate::procs::Proc;
+    s.cpu_info.name = "Octa-core CPU".into();
+    if let Some(g) = s.gpu.as_mut() {
+        g.name = "Lagoon Graphics".into();
+        g.driver = String::new();
+    }
+    for m in s.mem_info.modules.iter_mut() {
+        m.maker = String::new();
+        m.part = String::new();
+    }
+    for d in s.drives.iter_mut() {
+        d.model = "Lagoon SSD 1TB".into();
+        d.label = String::new();
+    }
+    let mb = 1024 * 1024;
+    s.procs = [("Claude", 2.4, 1900), ("Browser", 1.6, 1400), ("Code editor", 0.9, 820), ("Music", 0.4, 260), ("Terminal", 0.2, 90)]
+        .into_iter()
+        .map(|(name, cpu, mem): (&str, f32, u64)| Proc { name: name.into(), exe: String::new(), pids: Vec::new(), cpu: cpu / 100.0, mem: mem * mb })
+        .collect();
     s.batteries = vec![
         Battery { name: "Earbuds Pro".into(), pct: 80, kind: DevKind::Audio },
         Battery { name: "Mouse".into(), pct: 56, kind: DevKind::Mouse },

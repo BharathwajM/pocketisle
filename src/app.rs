@@ -7136,8 +7136,6 @@ impl App {
     // ---------- the demo's tour ----------
 
     fn demo_open(&mut self, tab: Tab, view: u8) {
-        self.expanded = true;
-        self.tab = tab;
         self.dex_card = view == 1;
         self.dex_quests = view == 2;
         self.dex_bag = view == 3;
@@ -7146,6 +7144,14 @@ impl App {
         self.legend_page = 8;
         self.dex_forms = false;
         self.dex_shiny = false;
+        // A tab a side panel shows opens from its panel, as it does for you.
+        if let Some(kind) = sides::SideKind::for_tab(tab).filter(|_| self.tab_on_side(tab)) {
+            self.demo_panel(kind);
+            return;
+        }
+        self.demo_panel_off();
+        self.expanded = true;
+        self.tab = tab;
         self.enter_tab();
         if tab == Tab::Controls {
             crate::demo::scrub_outputs(&mut self.outputs);
@@ -7244,6 +7250,9 @@ impl App {
                 ("tab-music", 5000)
             }
             14 => {
+                // The music stops here: the limits take the song's place beside the island,
+                // and the rest of the tour looks as the island does with nothing playing.
+                send(Event::Playback(false));
                 self.demo_open(Tab::Usage, 0);
                 ("tab-usage", 4500)
             }
@@ -7256,91 +7265,99 @@ impl App {
                 ("tab-system", 5000)
             }
             17 => {
+                self.demo_panel(sides::SideKind::Temp);
+                ("side-temp", 4500)
+            }
+            18 => {
+                self.demo_panel(sides::SideKind::Devices);
+                ("side-devices", 4000)
+            }
+            19 => {
                 self.demo_open(Tab::Weather, 0);
                 ("tab-weather", 4500)
             }
-            18 => {
+            20 => {
                 self.demo_open(Tab::Shelf, 0);
                 ("tab-shelf", 4500)
             }
-            19 => {
+            21 => {
                 self.demo_open(Tab::Dex, 0);
                 ("tab-pokedex", 5000)
             }
-            20 => {
+            22 => {
                 self.demo_open(Tab::Dex, 1);
                 ("tab-trainer", 5000)
             }
-            21 => {
+            23 => {
                 self.demo_open(Tab::Dex, 2);
                 ("tab-quests", 4500)
             }
-            22 => {
+            24 => {
                 self.demo_open(Tab::Dex, 3);
                 ("tab-bag", 4500)
             }
-            23 => {
+            25 => {
                 self.demo_open(Tab::Dex, 4);
                 ("tab-legends", 5000)
             }
-            24 => {
+            26 => {
                 self.demo_open(Tab::Battle, 0);
                 ("tab-battle", 5000)
             }
-            25 => {
+            27 => {
                 self.bt_click(battle_ui::BtBtn::Slot(1));
                 ("team-pick", 4000)
             }
-            26 => {
+            28 => {
                 self.team_pick = None;
                 self.start_traveller(0);
                 ("battle-start", 3500)
             }
-            27 => {
+            29 => {
                 self.demo_moves(&GALLERY);
                 ("battle-fx", (GALLERY.len() as f32 * battle_fx::MOVE_SECS * 1000.0) as u32 + 300)
             }
-            28 => {
+            30 => {
                 self.bt_click(battle_ui::BtBtn::Move(0));
                 ("battle-move", 6000)
             }
-            29 => {
+            31 => {
                 self.demo_finish_battle();
                 ("battle-end", 5000)
             }
-            30 => {
+            32 => {
                 self.battle = None;
                 self.demo_open(Tab::Game, 0);
                 ("tab-games", 4000)
             }
-            31 => {
+            33 => {
                 self.demo_open(Tab::Home, 0);
                 ("tab-home", 4500)
             }
-            32 => {
+            34 => {
                 self.demo_open(Tab::Controls, 0);
                 ("tab-controls", 4500)
             }
-            33 => {
+            35 => {
                 self.demo_open(Tab::Power, 0);
                 ("tab-power", 4000)
             }
-            34 => {
+            36 => {
                 self.expanded = false;
                 send(Event::Playback(false));
                 ("collapse", 3000)
             }
-            35 => {
+            37 => {
                 self.card = None;
                 self.queue.clear();
                 self.spawn_wild();
                 ("wild", 9000)
             }
-            36 => {
+            38 => {
                 self.throw_ball();
                 ("catch", 7000)
             }
-            37 => {
+            39 => {
                 self.card = None;
                 self.queue.clear();
                 if self.wild.is_some() {
@@ -7353,17 +7370,17 @@ impl App {
                 }
                 ("fishing", 4400)
             }
-            38 => {
+            40 => {
                 if self.fishing.as_ref().is_some_and(|f| f.bite.is_some()) {
                     self.reel_in();
                 }
                 ("reel", 3500)
             }
-            39 => {
+            41 => {
                 self.throw_ball();
                 ("catch-fish", 7000)
             }
-            40 => {
+            42 => {
                 self.card = None;
                 self.queue.clear();
                 self.wild = None;
@@ -7372,11 +7389,11 @@ impl App {
                 self.dex.egg = Some(crate::dex::Egg { species: "togepi".into(), shiny: false, minutes: 1, need: 1 });
                 ("egg", 2500)
             }
-            41 => {
+            43 => {
                 self.egg_minute();
                 ("hatch", 7000)
             }
-            42 => {
+            44 => {
                 self.card = None;
                 self.queue.clear();
                 send(Event::Weather(crate::demo::weather(true)));

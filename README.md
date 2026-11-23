@@ -6,11 +6,11 @@ the time, the weather and a Pokémon. It grows into cards when something happens
 into a full panel when you hover over it. One ~3 MB exe, no web view.
 
 <p align="center">
-  <img src="docs/media/highlights.gif" width="544" alt="Pocket Isle: a Claude Code permission prompt, a song peek, the Music, System, Weather, Pokédex and Battle tabs, a battle, catching a wild Pokémon, fishing and an egg hatching">
+  <img src="docs/media/highlights.gif" width="544" alt="Pocket Isle: a Claude Code permission prompt, a song peek, the Music, System, Temperature, Bluetooth and Pokédex side panels, the Weather and Battle tabs, a battle, catching a wild Pokémon, fishing and an egg hatching">
 </p>
 
 <p align="center">
-  <b><a href="https://github.com/BharathwajM/pocketisle/raw/main/docs/media/tour.mp4">▶ Download the full tour video (MP4, 3 min 23 s, 2.4 MB, no narration)</a></b><br>
+  <b><a href="https://github.com/BharathwajM/pocketisle/raw/main/docs/media/tour.mp4">▶ Download the full tour video (MP4, 3 min 32 s, 1.8 MB, no narration)</a></b><br>
   <sub>Every picture and the video come from <code>pocketisle.exe demo</code>, which plays the tour by itself with made-up data.</sub>
 </p>
 
@@ -75,7 +75,7 @@ dashboard, or each Bluetooth device with its battery. It closes when you move aw
 again. The Bluetooth panel asks a device connected over Bluetooth LE (an iPhone, for one) for
 its battery directly, because Windows' own copy can be hours old.
 
-<img src="docs/media/side-bluetooth.png" width="329" alt="The Bluetooth panel opened: headphones at 80% and a phone at 64%">
+<img src="docs/media/side-temp.png" width="394" alt="The temperature panel opened: the GPU at 55°C, the last five minutes, load, power and clock">&nbsp;&nbsp;<img src="docs/media/side-bluetooth.png" width="334" alt="The Bluetooth panel opened: headphones at 80% and a phone at 64%">
 
 The panels hide while the island is open or asking you something, and the island leaves
 out the tabs they already show. Pick which ones you want with `side_panels` in the
@@ -112,14 +112,15 @@ the right. The Pokédex and Battle tabs are under [Pokémon on the island](#pok�
 
 A tab a [side panel](#side-panels) already shows leaves the island and opens from its panel
 instead: with the default `"wings"`, that's Music, Usage (when you track Claude or Codex)
-and Calendar; with `"both"`, Pokédex and System as well. The pictures here show the island
-with `side_panels` set to `"off"`, so every tab is in the bar.
+and Calendar; with `"both"`, Pokédex and System as well. The pictures here are taken with
+`"both"`: Music, Usage, Calendar and System show as their panels opened, and the island's
+own tabs as the island shows them then.
 
 | | |
 |---|---|
-| <img src="docs/media/tab-music.png" width="420" alt="Music tab"><br>**Music**: art, title, artist and app, previous / play-pause / next, and a progress bar you can scrub. | <img src="docs/media/tab-usage.png" width="420" alt="Usage tab"><br>**Usage**: Claude's and Codex's 5-hour and weekly limits, with reset countdowns. Cards warn when one gets critical. |
-| <img src="docs/media/tab-calendar.png" width="420" alt="Calendar tab"><br>**Calendar**: today's events and the next one, from YASB's calendar, with reminders. | <img src="docs/media/tab-weather.png" width="420" alt="Weather tab"><br>**Weather**: now, the next hours and the next days (Open-Meteo). |
-| <img src="docs/media/tab-system.png" width="420" alt="System tab"><br>**System**: CPU, memory, GPU and disk with live graphs, network and ping, Bluetooth batteries, and the top apps (close one from here). Click a box for a detail page. | <img src="docs/media/tab-shelf.png" width="420" alt="Shelf tab"><br>**Shelf**: drop files on the island to keep them handy, then drag them out again. Below, the last 20 things you copied; click one to copy it again. |
+| <img src="docs/media/tab-music.png" width="420" alt="The song panel opened, as the Music tab"><br>**Music**: art, title, artist and app, previous / play-pause / next, and a progress bar you can scrub. | <img src="docs/media/tab-usage.png" width="420" alt="The limits panel opened, as the Usage tab"><br>**Usage**: Claude's and Codex's 5-hour and weekly limits, with reset countdowns. Cards warn when one gets critical. |
+| <img src="docs/media/tab-calendar.png" width="420" alt="The next-event panel opened, as the Calendar tab"><br>**Calendar**: today's events and the next one, from YASB's calendar, with reminders. | <img src="docs/media/tab-weather.png" width="420" alt="Weather tab"><br>**Weather**: now, the next hours and the next days (Open-Meteo). |
+| <img src="docs/media/tab-system.png" width="420" alt="The PC panel opened, as the System tab"><br>**System**: CPU, memory, GPU and disk with live graphs, network and ping, Bluetooth batteries, and the top apps (close one from here). Click a box for a detail page. | <img src="docs/media/tab-shelf.png" width="420" alt="Shelf tab"><br>**Shelf**: drop files on the island to keep them handy, then drag them out again. Below, the last 20 things you copied; click one to copy it again. |
 | <img src="docs/media/tab-home.png" width="420" alt="Home tab"><br>**Home**: shortcuts, plus notes and to-dos you can type straight into the island. | <img src="docs/media/tab-controls.png" width="420" alt="Controls tab"><br>**Controls**: Do Not Disturb, mute, mic mute, screenshot, the touch keyboard, dark mode, brightness / volume / mic sliders, a break reminder, the sound output, and Wallpaper Engine's wallpaper of the day. |
 | <img src="docs/media/tab-games.png" width="420" alt="Games tab"><br>**Games**: play DS, GBA and Game Boy games you own, in a window of their own (melonDS and mGBA cores), with your last five listed. No games come with Pocket Isle. | <img src="docs/media/tab-power.png" width="420" alt="Power tab"><br>**Power**: lock, sign out, sleep, hibernate, restart and shut down, with your uptime. |
 
@@ -132,11 +133,11 @@ catches give the team XP, and Pokémon evolve as the team levels up.
 
 | | |
 |---|---|
-| <img src="docs/media/wild.png" width="262" alt="A wild Combee by Eevee"><br>**Wild Pokémon** wander onto the pill every 5–15 minutes. Who comes depends on the real weather, the time of day and the season: water types in the rain, ghosts at night, no fire types in a storm. | <img src="docs/media/catch.png" width="262" alt="A Poké Ball wobbling"><br>**Catch them** by clicking when the ring is small (*Nice!*, *Great!*, *Excellent!*). Some want to battle first: a real turn-based battle on the Battle tab, which also has a Pokémon League for every region. |
-| <img src="docs/media/fishing.png" width="285" alt="Fishing rod and bobber with a bite"><br>**Fishing**: cast a line beside your Pokémon and click the bobber when the **!** shows. Some Pokémon only bite. | <img src="docs/media/reel.png" width="259" alt="Psyduck reeled in"><br>…then catch what you reeled in like any visitor. |
+| <img src="docs/media/wild.png" width="262" alt="A wild Pokémon by Eevee"><br>**Wild Pokémon** wander onto the pill every 5–15 minutes. Who comes depends on the real weather, the time of day and the season: water types in the rain, ghosts at night, no fire types in a storm. | <img src="docs/media/catch.png" width="262" alt="A Poké Ball wobbling"><br>**Catch them** by clicking when the ring is small (*Nice!*, *Great!*, *Excellent!*). Some want to battle first: a real turn-based battle on the Battle tab, which also has a Pokémon League for every region. |
+| <img src="docs/media/fishing.png" width="285" alt="Fishing rod and bobber with a bite"><br>**Fishing**: cast a line beside your Pokémon and click the bobber when the **!** shows. Some Pokémon only bite. | <img src="docs/media/reel.png" width="259" alt="A Pokémon reeled in"><br>…then catch what you reeled in like any visitor. |
 | <img src="docs/media/egg.png" width="277" alt="An egg beside Eevee"><br>**Eggs** turn up now and then and hatch after a couple of hours at your PC. | <img src="docs/media/hatch.png" width="272" alt="The egg hatching"><br>Babies and egg-only Pokémon hatch from them. |
 
-<img src="docs/media/tab-pokedex.png" width="560" alt="The Pokédex tab">
+<img src="docs/media/tab-pokedex.png" width="560" alt="The team panel opened, as the Pokédex tab">
 
 **The Pokédex tab**: the team's level, XP and next evolution, what the weather and season bring
 out, recent catches, and the full **National Pokédex** (all 1025, plus 190 regional forms,
@@ -156,8 +157,8 @@ will send out.
 
 | | |
 |---|---|
-| <img src="docs/media/battle-thunderbolt.png" width="420" alt="Scizor using Thunderbolt"><br>**Real turn-based battles** with animations for every move type: lightning, flames, water, leaves and more. | <img src="docs/media/battle-flamethrower.png" width="420" alt="Scizor using Flamethrower"><br>Type matchups, critical hits and accuracy work like the games. Pokémon battle at the evolution stage that fits their level. |
-| <img src="docs/media/battle-moves.png" width="420" alt="Druddigon raising its stats with Hone Claws, move buttons with PP"><br>**PP and stat changes**: each move shows its PP, and moves like Hone Claws or Swords Dance raise stats (arrows and chips show it). | Every win gives XP and Poké Balls, more on Hard and Max (up to 2 Master Balls for beating a champion on Max). Lose to the Elite Four and the run starts over. |
+| <img src="docs/media/battle-thunderbolt.png" width="420" alt="Machamp using Thunderbolt"><br>**Real turn-based battles** with animations for every move type: lightning, flames, water, leaves and more. | <img src="docs/media/battle-flamethrower.png" width="420" alt="Machamp using Flamethrower"><br>Type matchups, critical hits and accuracy work like the games. Pokémon battle at the evolution stage that fits their level. |
+| <img src="docs/media/battle-moves.png" width="420" alt="Bellossom raising its Sp. Atk, Sp. Def and Speed with Quiver Dance, move buttons with PP"><br>**PP and stat changes**: each move shows its PP, and moves like Quiver Dance or Swords Dance raise stats (arrows and chips show it). | Every win gives XP and Poké Balls, more on Hard and Max (up to 2 Master Balls for beating a champion on Max). Lose to the Elite Four and the run starts over. |
 
 Pocket Isle does not include any Pokémon sprites or cries. `tools/national_sprites.py` downloads
 them for your own use (see [Credits](#credits)); without them, small hand-drawn pixel
@@ -275,9 +276,10 @@ If you added Claude Code or Codex hooks, take them out of their settings files.
 pocketisle.exe demo
 ```
 
-This plays a ~3-minute tour of every feature by itself, using made-up music, weather, usage,
-calendar events, notes, files, notifications and Claude prompts, in front of a plain backdrop.
-It reads none of your data and ignores the mouse and keyboard. Its settings and saves go to
+This plays a ~3½-minute tour of every feature by itself, side panels included, using made-up
+music, weather, usage, calendar events, notes, files, notifications, Claude prompts, Bluetooth
+devices, hardware names and apps, in front of a plain backdrop. Only the PC's live load and
+temperature are real (so the graphs move), and it ignores the mouse and keyboard. Its settings and saves go to
 `%LOCALAPPDATA%\PocketIsle\demo`, a fresh copy of your settings and Pokédex each run, so your real
 files are never touched. Close your normal island first; the demo quits when the tour ends.
 The pictures and the video above were recorded from it with ffmpeg.

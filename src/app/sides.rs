@@ -96,6 +96,18 @@ impl SideKind {
         c.w() < self.small_width() - 34.0
     }
 
+    /// The panel that shows a tab, if any does.
+    pub(super) fn for_tab(tab: Tab) -> Option<SideKind> {
+        match tab {
+            Tab::Media => Some(SideKind::Song),
+            Tab::Usage => Some(SideKind::Limits),
+            Tab::Calendar => Some(SideKind::Next),
+            Tab::Dex => Some(SideKind::Team),
+            Tab::System => Some(SideKind::Machine),
+            _ => None,
+        }
+    }
+
     fn tab(self) -> Tab {
         match self {
             SideKind::Limits => Tab::Usage,
@@ -373,6 +385,9 @@ fn grow(p: Spec, anchor: i8, w: f32, h: f32, k: f32, s: f32) -> Spec {
     Spec { win: (x, p.win.1, ww, wh), body, rad, closed, full, ..p }
 }
 
+/// The panel the demo's tour has opened (it shows them as you'd open them).
+static DEMO_SIDE: Mutex<Option<SideKind>> = Mutex::new(None);
+
 /// For checking the opened panels in the demo: POCKETISLE_DEMO_OPEN=<slot> opens one.
 fn demo_open() -> Option<usize> {
     util::demo().then(|| std::env::var("POCKETISLE_DEMO_OPEN").ok()?.parse().ok()).flatten()
@@ -615,6 +630,18 @@ impl App {
         let kinds = self.side_kinds();
         if let Some(i) = demo_open() {
             self.side_open = kinds.get(i).copied().flatten().map(|k| (i, k));
+        } else if util::demo() {
+            // The tour's panel, once it's beside the island (the limits wait for the song to
+            // go).
+            let want = DEMO_SIDE.lock().ok().and_then(|k| *k);
+            let at = want.and_then(|k| kinds.iter().position(|x| *x == Some(k)).map(|i| (i, k)));
+            if at != self.side_open {
+                match at {
+                    Some((i, k)) if wanted => self.open_side(i, k),
+                    Some(_) => {}
+                    None => self.side_open = None,
+                }
+            }
         }
         // An opened panel closes when the island gets busy, when what it shows changes, or a
         // moment after the pointer leaves it. Where the pointer is gets checked here: Windows
@@ -871,6 +898,25 @@ impl App {
         }
         self.sides[i].hover_since = None;
         self.open_side(i, kind);
+    }
+
+    /// The demo's tour: open a panel (the island closes; cards make way).
+    pub(super) fn demo_panel(&mut self, kind: SideKind) {
+        self.expanded = false;
+        self.card = None;
+        self.queue.clear();
+        if let Ok(mut k) = DEMO_SIDE.lock() {
+            *k = Some(kind);
+        }
+        self.dirty = true;
+    }
+
+    /// The demo's tour: close its panel.
+    pub(super) fn demo_panel_off(&mut self) {
+        if let Ok(mut k) = DEMO_SIDE.lock() {
+            *k = None;
+        }
+        self.side_open = None;
     }
 
     /// Open a panel in place, fetching what its tab shows (the island itself stays as it is).
