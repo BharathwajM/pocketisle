@@ -66,6 +66,8 @@ pub struct BtDevice {
     pub name: String,
     pub kind: DevKind,
     pub pct: Option<u8>,
+    /// Its battery has been going up: it's charging (no device says so itself).
+    pub charging: bool,
 }
 
 /// Every Bluetooth device Windows reports a battery for, connected ones only.
@@ -102,7 +104,12 @@ pub fn bluetooth() -> Vec<BtDevice> {
             // Windows refreshes its copy only now and then (a phone's can be hours old): ask
             // the device itself when it's connected over Bluetooth LE.
             let fresh = e.ble.filter(|_| on).and_then(fresh_battery);
-            Some(BtDevice { name: tidy(&name), kind, pct: fresh.or(e.pct) })
+            let name = tidy(&name);
+            // A device asked directly only counts its own answers: Windows' older copy in
+            // between would look like the battery jumping about.
+            let seen = if e.ble.is_some() && on { fresh } else { e.pct };
+            let charging = charging(&name, seen);
+            Some(BtDevice { name, kind, pct: fresh.or(e.pct), charging })
         })
         .collect();
     out.sort_by(|a, b| a.name.cmp(&b.name));
@@ -226,6 +233,60 @@ fn parse_ble_id(id: &str) -> Option<u64> {
     let id = id.to_ascii_uppercase();
     let hex = id.strip_prefix("BTHLE\\DEV_")?.get(..12)?;
     u64::from_str_radix(hex, 16).ok()
+}
+
+/// How long a battery that went up counts as charging without going up again (a phone
+/// charges a percent every minute or two; one held at 80% to spare the battery doesn't).
+const CHARGE_HOLD: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+/// A device not seen for this long starts afresh (it may have charged while away).
+const CHARGE_AWAY: std::time::Duration = std::time::Duration::from_secs(3 * 60);
+
+/// A device's battery over time: its last level, when that last changed and which way, and
+/// when it was last seen.
+#[derive(Clone, Copy, Debug)]
+struct Track {
+    pct: u8,
+    changed: std::time::Instant,
+    rising: bool,
+    seen: std::time::Instant,
+}
+
+static TRACKS: std::sync::Mutex<Vec<(String, Track)>> = std::sync::Mutex::new(Vec::new());
+
+/// The next state of a device's battery track after a reading.
+fn track(prev: Option<Track>, pct: u8, now: std::time::Instant) -> Track {
+    match prev.filter(|t| now.duration_since(t.seen) < CHARGE_AWAY) {
+        Some(t) if pct > t.pct => Track { pct, changed: now, rising: true, seen: now },
+        Some(t) if pct < t.pct => Track { pct, changed: now, rising: false, seen: now },
+        Some(t) => Track { seen: now, ..t },
+        None => Track { pct, changed: now, rising: false, seen: now },
+    }
+}
+
+/// It's charging: its battery last went up, lately (or it went up to full).
+fn is_charging(t: &Track, now: std::time::Instant) -> bool {
+    t.rising && (now.duration_since(t.changed) < CHARGE_HOLD || t.pct == 100)
+}
+
+/// Note a device's battery reading (None: no trustworthy one this time) and say whether
+/// it's charging.
+fn charging(name: &str, pct: Option<u8>) -> bool {
+    let now = std::time::Instant::now();
+    let Ok(mut tracks) = TRACKS.lock() else { return false };
+    let i = tracks.iter().position(|(n, _)| n == name);
+    let prev = i.map(|i| tracks[i].1);
+    let t = match pct {
+        Some(p) => track(prev, p, now),
+        None => match prev {
+            Some(t) => t,
+            None => return false,
+        },
+    };
+    match i {
+        Some(i) => tracks[i].1 = t,
+        None => tracks.push((name.to_string(), t)),
+    }
+    is_charging(&t, now)
 }
 
 /// How often a device is asked for its battery (each ask wakes its radio a moment).
@@ -441,5 +502,43 @@ mod ble_tests {
         for d in super::bluetooth() {
             println!("{:?}", d);
         }
+    }
+}
+
+#[cfg(test)]
+mod charge_tests {
+    use super::{is_charging, track, CHARGE_AWAY, CHARGE_HOLD};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn rising_battery_is_charging() {
+        let t0 = Instant::now();
+        let a = track(None, 35, t0);
+        assert!(!is_charging(&a, t0));
+        let b = track(Some(a), 36, t0 + Duration::from_secs(60));
+        assert!(is_charging(&b, t0 + Duration::from_secs(60)));
+        // Holding steady a while still counts…
+        let c = track(Some(b), 36, t0 + Duration::from_secs(120));
+        assert!(is_charging(&c, t0 + Duration::from_secs(120)));
+        // …but not once it has held long, and not once it drops.
+        assert!(!is_charging(&c, t0 + Duration::from_secs(60) + CHARGE_HOLD));
+        let d = track(Some(c), 35, t0 + Duration::from_secs(180));
+        assert!(!is_charging(&d, t0 + Duration::from_secs(180)));
+    }
+
+    #[test]
+    fn full_after_charging_stays_charging() {
+        let t0 = Instant::now();
+        let a = track(None, 99, t0);
+        let b = track(Some(a), 100, t0 + Duration::from_secs(60));
+        assert!(is_charging(&b, t0 + Duration::from_secs(60) + CHARGE_HOLD * 2));
+    }
+
+    #[test]
+    fn back_from_away_starts_afresh() {
+        let t0 = Instant::now();
+        let a = track(None, 40, t0);
+        let b = track(Some(a), 70, t0 + CHARGE_AWAY + Duration::from_secs(1));
+        assert!(!is_charging(&b, t0 + CHARGE_AWAY + Duration::from_secs(1)));
     }
 }

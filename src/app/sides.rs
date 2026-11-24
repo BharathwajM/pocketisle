@@ -196,10 +196,10 @@ fn watch_batteries() {
 }
 
 /// The connected Bluetooth devices (headphones first, then the phone, then the rest): each
-/// one's symbol, name and battery, if Windows knows it.
-fn devices_list() -> Vec<(&'static str, String, Option<u8>)> {
+/// one's symbol, name, battery (if known) and whether it's charging.
+fn devices_list() -> Vec<(&'static str, String, Option<u8>, bool)> {
     if util::demo() {
-        return vec![(G_HEADPHONES, "Headphones".into(), Some(80)), (G_PHONE, "Phone".into(), Some(64))];
+        return vec![(G_HEADPHONES, "Headphones".into(), Some(80), false), (G_PHONE, "Phone".into(), Some(64), false)];
     }
     let Ok(list) = BATTERIES.lock() else { return Vec::new() };
     let rank = |k: DevKind| match k {
@@ -207,7 +207,7 @@ fn devices_list() -> Vec<(&'static str, String, Option<u8>)> {
         DevKind::Phone => 1,
         _ => 2,
     };
-    let mut out: Vec<(u8, &'static str, String, Option<u8>)> = list
+    let mut out: Vec<(u8, &'static str, String, Option<u8>, bool)> = list
         .iter()
         .map(|d| {
             let glyph = match d.kind {
@@ -219,16 +219,17 @@ fn devices_list() -> Vec<(&'static str, String, Option<u8>)> {
                 DevKind::Pen => G_PEN,
                 DevKind::Other => G_BLUETOOTH,
             };
-            (rank(d.kind), glyph, d.name.clone(), d.pct)
+            (rank(d.kind), glyph, d.name.clone(), d.pct, d.charging)
         })
         .collect();
     out.sort_by_key(|g| g.0);
-    out.into_iter().map(|(_, g, n, p)| (g, n, p)).collect()
+    out.into_iter().map(|(_, g, n, p, c)| (g, n, p, c)).collect()
 }
 
-/// The devices at a glance: each one's symbol and battery (at most four).
-fn gadgets() -> Vec<(&'static str, Option<u8>)> {
-    devices_list().into_iter().take(4).map(|(g, _, p)| (g, p)).collect()
+/// The devices at a glance: each one's symbol, battery and whether it's charging (at most
+/// four).
+fn gadgets() -> Vec<(&'static str, Option<u8>, bool)> {
+    devices_list().into_iter().take(4).map(|(g, _, p, c)| (g, p, c)).collect()
 }
 
 /// How full a battery is, in a word and a colour.
@@ -277,11 +278,11 @@ pub(super) fn thumb(a: &crate::events::Art) -> crate::events::Art {
 }
 
 /// How wide a device is beside what's next: a symbol and its battery, or the symbol alone.
-fn gadget_w(g: &(&'static str, Option<u8>)) -> f32 {
-    if g.1.is_some() {
-        58.0
-    } else {
-        26.0
+fn gadget_w(g: &(&'static str, Option<u8>, bool)) -> f32 {
+    match g {
+        (_, Some(_), true) => 68.0,
+        (_, Some(_), false) => 58.0,
+        _ => 26.0,
     }
 }
 
@@ -1405,17 +1406,25 @@ impl App {
         if c.w() + 4.0 >= full {
             let mut x = c.cx() - full / 2.0;
             for g in &list {
-                let (glyph, pct) = *g;
-                self.r.icon(glyph, R::new(x, c.y0, x + 20.0, c.y1), 14.0, col_of(pct));
+                let (glyph, pct, charging) = *g;
+                // Charging: green, with a bolt after the percentage.
+                let col = if charging { LEAF } else { col_of(pct) };
+                self.r.icon(glyph, R::new(x, c.y0, x + 20.0, c.y1), 14.0, col);
                 if let Some(pct) = pct {
-                    self.side_text(&format!("{pct}%"), x + 22.0, x + gadget_w(g), c.cy(), 11.5, 600, th.text, Align::Left);
+                    let s = format!("{pct}%");
+                    self.side_text(&s, x + 22.0, x + gadget_w(g), c.cy(), 11.5, 600, th.text, Align::Left);
+                    if charging {
+                        let bx = x + 22.0 + self.text_width_at(&s, 11.5, 600) + 1.0;
+                        self.r.icon(G_BOLT, R::new(bx, c.y0, bx + 11.0, c.y1), 11.0, LEAF);
+                    }
                 }
                 x += gadget_w(g);
             }
         } else if c.w() + 4.0 >= icons {
             let mut x = c.cx() - icons / 2.0;
-            for (glyph, pct) in &list {
-                self.r.icon(glyph, R::new(x, c.y0, x + 20.0, c.y1), 14.0, if pct.is_some() { col_of(*pct) } else { th.subtext });
+            for (glyph, pct, charging) in &list {
+                let col = if *charging { LEAF } else if pct.is_some() { col_of(*pct) } else { th.subtext };
+                self.r.icon(glyph, R::new(x, c.y0, x + 20.0, c.y1), 14.0, col);
                 x += 26.0;
             }
         } else {
@@ -1431,10 +1440,11 @@ impl App {
         if list.is_empty() {
             return self.empty_row(G_BLUETOOTH, "No Bluetooth devices connected", x0, x1, y);
         }
-        for (glyph, name, pct) in &list {
+        for (glyph, name, pct, charging) in &list {
             let row = R::new(x0, y, x1, y + DEV_ROW);
             self.r.fill_round(row, 12.0, th.bg2.a(0.6));
             let (word, col) = match pct {
+                Some(_) if *charging => ("Charging", LEAF),
                 Some(p) => charge_word(*p),
                 None => ("Battery not reported", th.subtext),
             };
@@ -1444,7 +1454,12 @@ impl App {
                 Some(p) => {
                     self.side_bar(x0 + 52.0, x1 - 150.0, y + 37.0, *p as f32 / 100.0, col);
                     self.r.text(word, R::new(x1 - 144.0, y + 28.0, x1 - 70.0, y + 46.0), 10.5, 500, col, Align::Left);
-                    self.r.text(&format!("{p}%"), R::new(x1 - 70.0, y + 8.0, x1 - 14.0, y + 44.0), 17.0, 600, th.text, Align::Right);
+                    let s = format!("{p}%");
+                    self.r.text(&s, R::new(x1 - 70.0, y + 8.0, x1 - 14.0, y + 44.0), 17.0, 600, th.text, Align::Right);
+                    if *charging {
+                        let bx = x1 - 14.0 - self.text_width_at(&s, 17.0, 600) - 16.0;
+                        self.r.icon(G_BOLT, R::new(bx, y + 8.0, bx + 14.0, y + 44.0), 14.0, LEAF);
+                    }
                 }
                 None => {
                     self.r.text(word, R::new(x0 + 52.0, y + 28.0, x1 - 14.0, y + 46.0), 10.5, 400, th.subtext, Align::Left);
@@ -1452,7 +1467,7 @@ impl App {
             }
             y += DEV_ROW + 8.0;
         }
-        self.r.text("Charge as each device reports it (Windows can't read battery wear)", R::new(x0 + 4.0, y, x1, y + 18.0), 10.0, 400, th.subtext, Align::Left);
+        self.r.text("Charge as each device reports it · charging when it's been going up", R::new(x0 + 4.0, y, x1, y + 18.0), 10.0, 400, th.subtext, Align::Left);
     }
 
     /// The sizes a gap panel can take, widest first.
