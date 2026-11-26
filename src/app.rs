@@ -96,6 +96,8 @@ const G_DISK: &str = "\u{f02ca}";
 const G_MIC: &str = "\u{f036c}";
 
 static HOOK_ON: AtomicBool = AtomicBool::new(false);
+/// A full-screen app is in front and the island is hidden: the volume keys go to Windows.
+static PASS_VOL_KEYS: AtomicBool = AtomicBool::new(false);
 /// The main island window (the copies on other screens forward their input to it).
 static MAIN_HWND: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
 
@@ -2474,8 +2476,17 @@ impl App {
         }
     }
 
+    /// Hidden for a full-screen game or video: nothing shows over it then, not even the volume
+    /// pop-up (a window on top knocks many games out of full screen).
+    fn hidden_for_fullscreen(&self) -> bool {
+        self.cfg.hide_in_fullscreen && self.fullscreen
+    }
+
     fn update_visibility(&mut self) {
-        let want = !(self.cfg.hide_in_fullscreen && self.fullscreen) || self.osd.is_some();
+        let want = !self.hidden_for_fullscreen();
+        // Meanwhile the volume keys go to Windows as usual (its own flyout knows how to
+        // behave over a game).
+        PASS_VOL_KEYS.store(!want, Ordering::SeqCst);
         if want != self.visible {
             unsafe {
                 let _ = ShowWindow(self.hwnd, if want { SW_SHOWNOACTIVATE } else { SW_HIDE });
@@ -2500,6 +2511,9 @@ impl App {
         if self.expanded && self.tab == Tab::Controls {
             // The sliders already show it.
             self.dirty = true;
+            return;
+        }
+        if self.hidden_for_fullscreen() {
             return;
         }
         self.osd = Some(Osd { kind, value, muted, until: Instant::now() + Duration::from_millis(1600) });
@@ -9591,7 +9605,7 @@ impl App {
 // ---------- window plumbing ----------
 
 unsafe extern "system" fn kb_hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
-    if code == HC_ACTION as i32 && HOOK_ON.load(Ordering::Relaxed) {
+    if code == HC_ACTION as i32 && HOOK_ON.load(Ordering::Relaxed) && !PASS_VOL_KEYS.load(Ordering::Relaxed) {
         let k = &*(lp.0 as *const KBDLLHOOKSTRUCT);
         let vk = VIRTUAL_KEY(k.vkCode as u16);
         if vk == VK_VOLUME_UP || vk == VK_VOLUME_DOWN || vk == VK_VOLUME_MUTE {
